@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="自分の収入なら、どこまでお金を使っていいのか分かる家計アプリ">
+  <title>my-money</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="my-money">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1 id="page-title">ホーム</h1>
+    <span class="offline-badge" id="offline-badge" hidden>オフライン</span>
+  </header>
+
+  <main id="main" class="main"></main>
+
+  <nav class="nav" aria-label="メインメニュー">
+    <a href="#/home" data-route="home"><span aria-hidden="true">🏠</span>ホーム</a>
+    <a href="#/ledger" data-route="ledger"><span aria-hidden="true">📝</span>家計簿</a>
+    <a href="#/budget" data-route="budget"><span aria-hidden="true">📊</span>予算</a>
+    <a href="#/sim" data-route="sim"><span aria-hidden="true">📈</span>将来</a>
+    <a href="#/settings" data-route="settings"><span aria-hidden="true">⚙️</span>設定</a>
+  </nav>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
