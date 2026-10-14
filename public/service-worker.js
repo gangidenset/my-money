@@ -2,7 +2,7 @@
 // 方針：ネットワーク優先（常に最新のアプリを使う）→ つながらないときはキャッシュで起動する。
 // アプリのファイルを追加・削除したら SHELL を更新し、CACHE の番号を上げる。
 
-const CACHE = 'my-money-v6';
+const CACHE = 'my-money-v7';
 const SHELL = [
   './',
   './index.html',
@@ -11,6 +11,8 @@ const SHELL = [
   './js/app.js',
   './js/core.js',
   './js/ui.js',
+  './js/guides.js',
+  './js/guideContent.js',
   './js/views/home.js',
   './js/views/ledger.js',
   './js/views/charts.js',

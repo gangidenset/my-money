@@ -139,6 +139,7 @@ export async function loadAll() {
   ]);
   if (!state.meta.firstUsedAt) {
     state.meta.firstUsedAt = new Date().toISOString();
+    state.meta.guideIntroSeen = true; // 新しく使い始めた人には「ガイドができました」は出さない
     await ds.saveMeta(state.meta);
   }
 }

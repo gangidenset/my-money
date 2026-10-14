@@ -583,3 +583,61 @@ input[data-money] { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .chip-toggle.selected { background: var(--primary-soft); border-color: var(--primary); color: var(--text); font-weight: 700; }
 .bonus-only[hidden] { display: none; }
+
+/* ---- 使い方ガイド ---- */
+.help-btn {
+  display: inline-grid; place-items: center; flex: none;
+  width: 22px; height: 22px; margin-left: 6px; padding: 0; vertical-align: 1px;
+  border-radius: 50%; border: 1.5px solid var(--border); background: var(--surface);
+  color: var(--muted); font: 700 0.75rem/1 system-ui, sans-serif; cursor: pointer;
+  position: relative;
+}
+/* 見た目は小さくても、押せる範囲は 44px 四方にする */
+.help-btn::after { content: ''; position: absolute; inset: -11px; }
+.help-btn:hover, .help-btn:focus-visible { color: var(--primary); border-color: var(--primary); }
+.help-btn.small { width: 18px; height: 18px; font-size: 0.68rem; margin: 0 4px; }
+.help-btn.on-dark { background: rgb(255 255 255 / 0.18); border-color: rgb(255 255 255 / 0.5); color: #fff; }
+.card h2 { display: flex; align-items: center; flex-wrap: wrap; gap: 0 2px; }
+.month-nav h2 { justify-content: center; }
+.topbar { display: flex; align-items: center; }
+.topbar h1 { flex: 1; }
+.topbar-help {
+  width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid var(--border);
+  background: var(--surface); color: var(--muted); font: 700 0.95rem/1 system-ui, sans-serif; cursor: pointer; flex: none;
+}
+.topbar-help:hover, .topbar-help:focus-visible { color: var(--primary); border-color: var(--primary); }
+.offline-badge { position: static; margin-right: 8px; }
+
+.guide-intro { padding: 12px 14px; border-radius: 12px; background: var(--primary-soft); }
+.guide-intro p { margin: 0; font-size: 0.88rem; }
+.guide-intro .btn-row { margin-top: 10px; }
+
+.guide-sheet {
+  width: 100%; max-width: 560px; max-height: 86vh; max-height: 86dvh;
+  margin: auto auto 0; padding: 0; border: 0; border-radius: 20px 20px 0 0;
+  background: var(--surface); color: var(--text); box-shadow: 0 -8px 30px rgb(0 0 0 / 0.25);
+  overflow: auto; overscroll-behavior: contain;
+}
+.guide-sheet::backdrop { background: rgb(0 0 0 / 0.4); }
+.guide-sheet[open] { animation: sheet-up 0.2s ease-out; }
+@keyframes sheet-up { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .guide-sheet[open] { animation: none; } }
+.guide-inner { padding: 0 16px calc(env(safe-area-inset-bottom) + 20px); }
+.guide-head {
+  position: sticky; top: 0; z-index: 1; display: grid; grid-template-columns: 40px 1fr 40px; align-items: center;
+  padding: 10px 0; background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.guide-head h2 { margin: 0; text-align: center; font-size: 1rem; }
+.guide-body h3 { font-size: 0.85rem; color: var(--muted); margin: 18px 0 6px; }
+.guide-summary { margin: 14px 0 0; font-size: 0.95rem; }
+.guide-steps, .guide-tips { margin: 0; padding-left: 1.4em; font-size: 0.9rem; }
+.guide-steps li, .guide-tips li { margin-bottom: 6px; }
+.guide-tips li::marker { color: var(--primary); }
+.guide-links { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.guide-link {
+  display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 6px;
+  min-height: 48px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 0.92rem; text-align: left; cursor: pointer;
+}
+.guide-link:hover, .guide-link:focus-visible { border-color: var(--primary); }
+.guide-sheet .guide-all { margin-top: 14px; }

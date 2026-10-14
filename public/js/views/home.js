@@ -7,6 +7,7 @@ import {
   pendingSettlement, bonus, logGoal, unlogGoal,
 } from '../core.js';
 import { showToast, moneyAttrs, bar, signed } from '../ui.js';
+import { helpBtn } from '../guides.js';
 
 /* ---------- ホーム ---------- */
 
@@ -21,6 +22,7 @@ export function homeView() {
         <h2>はじめに</h2>
         <p>手取り収入と固定費を入力すると、<strong>今月あといくら使えるか</strong>を計算します。</p>
         <a class="btn primary block" href="#/budget">収入・固定費を入力する</a>
+        <button type="button" class="btn block" data-action="help" data-guide="start">📖 使い方を見る</button>
       </section>`;
   }
 
@@ -54,8 +56,15 @@ export function homeView() {
   const endWord = payday() > 1 ? '給料日前日' : '月末';
 
   return `
+    ${state.meta.guideIntroSeen ? '' : `<section class="guide-intro" role="status">
+      <p>📖 <strong>使い方ガイドができました。</strong>各機能の見出しの「?」や、画面右上の「?」を押すと使い方が出ます。</p>
+      <div class="btn-row">
+        <button type="button" class="btn" data-action="help-all">ガイドを見る</button>
+        <button type="button" class="btn ghost" data-action="dismiss-guide-intro">閉じる</button>
+      </div>
+    </section>`}
     <section class="hero ${over ? 'is-over' : ''}">
-      <p class="hero-label">今月あと</p>
+      <p class="hero-label">今月あと ${helpBtn('remaining', 'on-dark')}</p>
       <p class="hero-value">${over ? '0円' : yen(a.monthLeft)}</p>
       <p class="hero-sub">${untilLabel}残り${a.daysLeft}日</p>
     </section>
@@ -71,7 +80,7 @@ export function homeView() {
     ${todoCard()}
 
     <section class="card">
-      <h2>この出費、大丈夫？</h2>
+      <h2>この出費、大丈夫？${helpBtn('check')}</h2>
       <span class="money-input">
         <input ${moneyAttrs} id="check-amount" value="${esc(formatMoneyText(ui.checkAmount))}" placeholder="使いたい金額">
         <span class="unit">円</span>
@@ -82,7 +91,7 @@ export function homeView() {
     ${allocHomeCard(usage)}
 
     <section class="card">
-      <h2>今月のお金の流れ</h2>
+      <h2>今月のお金の流れ${helpBtn('flow')}</h2>
       <dl class="flow">
         <div><dt>収入</dt><dd>${yen(p.income)}</dd></div>
         <div><dt>固定費</dt><dd>−${yen(p.fixed)}</dd></div>
@@ -98,7 +107,7 @@ export function homeView() {
     </section>
 
     <section class="card">
-      <h2>今月の予算消化</h2>
+      <h2>今月の予算消化${helpBtn('progress')}</h2>
       <div class="meter-row"><div class="meter-head"><span>生活費</span><span>${yen(s.living)} / ${yen(p.living)}</span></div>${bar(s.living, p.living)}</div>
       <div class="meter-row"><div class="meter-head"><span>自由に使えるお金</span><span>${yen(a.monthUsed)} / ${yen(Math.max(0, p.free))}</span></div>${bar(a.monthUsed, Math.max(0, p.free))}</div>
       ${livingRows ? `<details><summary>生活費の内訳</summary>${livingRows}</details>` : ''}
@@ -106,7 +115,7 @@ export function homeView() {
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>最近の支出</h2><a href="#/ledger">家計簿へ</a></div>
+      <div class="card-head"><h2>最近の支出${helpBtn('edit')}</h2><a href="#/ledger">家計簿へ</a></div>
       ${recent.length ? `<ul class="exp-list">${recent.map(expenseRow).join('')}</ul>` : '<p class="muted">まだ支出がありません。</p>'}
     </section>
 
@@ -117,13 +126,13 @@ export function allocHomeCard(usage) {
   const rows = freeAlloc().items.filter((i) => catMap()[i.category]);
   if (!rows.length) {
     return `<section class="card">
-      <h2>使い道ごとの予算</h2>
+      <h2>使い道ごとの予算${helpBtn('alloc-home')}</h2>
       <p class="muted">自由に使えるお金を外食・趣味などに配分すると、「外食は週いくらまで？」が分かります。</p>
       <a class="btn block" href="#/budget">配分を決める</a>
     </section>`;
   }
   return `<section class="card">
-    <div class="card-head"><h2>使い道ごとの予算</h2><a href="#/budget">配分を変更</a></div>
+    <div class="card-head"><h2>使い道ごとの予算${helpBtn('alloc-home')}</h2><a href="#/budget">配分を変更</a></div>
     ${rows.map((i) => {
       const used = usage.month[i.category] || 0;
       const weekLeft = i.weekly - (usage.week[i.category] || 0);
@@ -154,7 +163,7 @@ export function expenseRow(e) {
       <span class="exp-main">${esc(e.shop) || '<span class="muted">（店名なし）</span>'}${e.memo ? `<small>${esc(e.memo)}</small>` : ''}</span>
       <span class="exp-amount">${yen(e.amount)}<small>${d.getMonth() + 1}/${d.getDate()}</small></span>
     </button>
-    <button class="icon-btn" data-action="delete-expense" data-id="${esc(e.id)}" aria-label="削除">✕</button>
+    <button class="icon-btn" data-action="delete-expense" data-id="${esc(e.id)}" aria-label="${yen(e.amount)}の支出を削除">✕</button>
   </li>`;
 }
 
@@ -176,7 +185,7 @@ export function todoCard() {
   const items = [settlementItem(), bonusItem(), goalsItem(), backupBanner()].filter(Boolean);
   if (!items.length) return '';
   return `<section class="card todo-card" aria-label="今月のやること">
-    <h2>📌 今月のやること</h2>
+    <h2>📌 今月のやること${helpBtn('todo')}</h2>
     ${items.join('')}
   </section>`;
 }
@@ -188,7 +197,7 @@ function settlementItem() {
   const label = periodLabel(s.period);
   if (s.leftover < 0) {
     return `<div class="todo-item settle">
-      <p>先月（${label}）は、予定より<strong>${yen(-s.leftover)}</strong>多く使いました。どうしますか？</p>
+      <p>先月（${label}）は、予定より<strong>${yen(-s.leftover)}</strong>多く使いました。どうしますか？${helpBtn('settle')}</p>
       <div class="settle-actions">
         <button class="btn" data-action="settle" data-kind="cover">貯金から補てんした</button>
         <button class="btn" data-action="settle" data-kind="carry">今月の予算から差し引く</button>
@@ -198,7 +207,7 @@ function settlementItem() {
   }
   const goals = state.goals.filter((g) => n(g.targetAmount) > 0 && goalPlan(g, new Date(), bonus()).status !== 'done');
   return `<div class="todo-item settle">
-    <p>先月（${label}）は、自由に使えるお金が<strong>${yen(s.leftover)}</strong>余りました。どうしますか？</p>
+    <p>先月（${label}）は、自由に使えるお金が<strong>${yen(s.leftover)}</strong>余りました。どうしますか？${helpBtn('settle')}</p>
     <div class="settle-actions">
       <button class="btn" data-action="settle" data-kind="savings">貯金に回す</button>
       <button class="btn" data-action="settle" data-kind="carry">今月に繰り越す</button>
@@ -241,6 +250,11 @@ function goalsItem() {
 /* ---------- ボタン操作（data-action） ---------- */
 
 export const homeActions = {
+  'dismiss-guide-intro': async (btn, ev) => {
+    state.meta.guideIntroSeen = true;
+    await ds.saveMeta(state.meta);
+    render();
+  },
   /** 先月の締め：savings / cover（貯金を増減）・goal（目的別へ）・carry（今月へ繰り越し）・none */
   'settle': async (btn, ev) => {
     const s = pendingSettlement();

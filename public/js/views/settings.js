@@ -3,12 +3,13 @@ import {
 } from '../calc.js';
 import { persistent, ds, state, ui, esc, catMap, loadAll, render, payday, bonus } from '../core.js';
 import { showToast } from '../ui.js';
+import { helpBtn } from '../guides.js';
 
 /* ---------- 設定 ---------- */
 
 /* ---------- PWA（ホーム画面に追加・オフライン） ---------- */
 
-export const APP_VERSION = '1.4.0';
+export const APP_VERSION = '1.5.0';
 export let installPrompt = null;
 export const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 export const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -29,7 +30,7 @@ export function installCard() {
   } else {
     body = '<p>ブラウザのメニュー（︙）から<strong>「アプリをインストール」</strong>または<strong>「ホーム画面に追加」</strong>を選んでください。</p>';
   }
-  return `<section class="card" id="install-card"><h2>📱 アプリとして使う</h2>${body}</section>`;
+  return `<section class="card" id="install-card"><h2>📱 アプリとして使う${helpBtn('install')}</h2>${body}</section>`;
 }
 
 export function refreshInstallCard() {
@@ -96,17 +97,26 @@ export async function exportBackup() {
 export function settingsView() {
   const custom = state.categories.filter((c) => c.custom);
   return `
+    <section class="card">
+      <h2>📖 使い方ガイド</h2>
+      <p class="note lead">機能ごとの使い方をまとめています。各画面の右上や、機能の見出しの「？」からも開けます。</p>
+      <div class="btn-row">
+        <button type="button" class="btn" data-action="help" data-guide="start">はじめての使い方</button>
+        <button type="button" class="btn" data-action="help-all">すべての使い方</button>
+      </div>
+    </section>
+
     ${installCard()}
 
     <section class="card" id="reminder-card">
-      <h2>📅 給料日のお知らせ</h2>
+      <h2>📅 給料日のお知らせ${helpBtn('reminder')}</h2>
       <p class="note lead">給料日（毎月${payday()}日）${bonus().active ? `とボーナス月（${bonus().months.map((m) => `${m}月`).join('・')}）` : ''}の朝9時に、スマホのカレンダーから通知が届くように登録できます。先月の余ったお金・目的別の積立・バックアップの確認に使ってください。</p>
       <button class="btn block" data-action="add-calendar">カレンダーに登録する</button>
       <p class="note">アプリを閉じていても届くよう、スマホのカレンダーの通知を使います（家計のデータを外部のサーバーに送らないため、アプリからの通知はしていません）。給料日やボーナス月を変えたら、もう一度登録し直してください。</p>
     </section>
 
     <section class="card">
-      <h2>カテゴリを追加</h2>
+      <h2>カテゴリを追加${helpBtn('category')}</h2>
       <div class="cat-form">
         <input type="text" id="cat-icon" placeholder="🐶" maxlength="2" aria-label="絵文字">
         <input type="text" id="cat-name" placeholder="カテゴリ名（例：ペット）" maxlength="12" aria-label="カテゴリ名">
@@ -120,7 +130,7 @@ export function settingsView() {
     </section>
 
     <section class="card" id="data-card">
-      <h2>データ</h2>
+      <h2>データ${helpBtn('backup')}</h2>
       <p class="note">${persistent ? 'データはこの端末のブラウザ内にだけ保存され、外部には送信されません。' : '⚠ このブラウザでは保存ができないため、ページを閉じるとデータが消えます。'}</p>
       <p class="backup-status">${lastBackupText()}</p>
       ${isIOS() && !isStandalone() ? '<p class="note caution">Safari のまま使っていると、しばらくアプリを開かなかったときにデータが消えることがあります。ホーム画面に追加して使うと安心です。</p>' : ''}

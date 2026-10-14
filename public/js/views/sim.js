@@ -4,6 +4,7 @@ import {
 } from '../calc.js';
 import { ds, state, esc, catMap, plan, basePlan, generalSavings, freeAlloc, render, bonus } from '../core.js';
 import { moneyValue, moneyAttrs, numberInput, moneyInput } from '../ui.js';
+import { helpBtn } from '../guides.js';
 
 /* ---------- シミュレーション ---------- */
 
@@ -32,7 +33,7 @@ export function simView() {
     <section class="card" id="health-card">${healthCard()}</section>
 
     <section class="card">
-      <h2>貯金</h2>
+      <h2>貯金${helpBtn('future')}</h2>
       ${moneyInput('profile.currentSavings', pr.currentSavings, '現在の貯金額')}
       ${moneyInput('simulation.monthlySavings', sim.monthlySavings, '毎月の貯蓄額')}
       <p class="note">年間 <strong data-live="annual">${yen(n(sim.monthlySavings) * 12)}</strong> 貯まる計算です。${bonusSavingsPerYear() > 0 ? `ボーナスから貯金に回す年${yen(bonusSavingsPerYear())}も加えて計算します。` : ''}</p>
@@ -40,7 +41,7 @@ export function simView() {
     </section>
 
     <section class="card">
-      <h2>積立投資（NISAなど）</h2>
+      <h2>積立投資（NISAなど）${helpBtn('invest')}</h2>
       ${moneyInput('profile.currentInvestment', pr.currentInvestment, '現在の投資残高')}
       ${moneyInput('simulation.monthlyInvestment', sim.monthlyInvestment, '毎月の積立額')}
       <div class="field-pair">
@@ -59,7 +60,7 @@ export function simView() {
     </section>
 
     <section class="card">
-      <h2>🎯 目標金額から逆算</h2>
+      <h2>🏁 資産全体の目標から逆算${helpBtn('target')}</h2>
       <div class="field-pair">
         ${moneyInput('goal.targetAmount', goal.targetAmount, '目標金額')}
         ${numberInput('goal.years', goal.years, '期間', { unit: '年後', max: 50 })}
@@ -68,7 +69,7 @@ export function simView() {
     </section>
 
     <section class="card">
-      <h2>📈 昇給・転職シミュレーション</h2>
+      <h2>📈 昇給・転職シミュレーション${helpBtn('raise')}</h2>
       <div class="field-pair">
         ${numberInput('simulation.incomeGrowthRate', sim.incomeGrowthRate, '毎年の昇給率', { unit: '%', step: 0.1, max: 20 })}
         ${moneyInput('simulation.jobChangeIncrease', sim.jobChangeIncrease, '転職などで手取り増')}
@@ -78,7 +79,7 @@ export function simView() {
     </section>
 
     <section class="card">
-      <h2>✂️ 節約効果シミュレーション</h2>
+      <h2>✂️ 節約効果シミュレーション${helpBtn('saving')}</h2>
       ${savingRows()}
       <div id="saving-result">${savingResult()}</div>
     </section>`;
@@ -88,7 +89,7 @@ export function healthCard() {
   // 家計の診断は、繰り越しを含まない毎月の計画で行う
   const p = basePlan();
   const h = householdHealth(p);
-  if (!h) return '<h2>家計の診断</h2><p class="muted">予算タブで手取り収入を入力すると診断できます。</p>';
+  if (!h) return `<h2>家計の診断${helpBtn('health')}</h2><p class="muted">予算タブで手取り収入を入力すると診断できます。</p>`;
   const pos = Math.max(0, p.free);
   const total = Math.max(p.income, p.fixed + p.living + p.savings + p.investment + p.goals + pos);
   const seg = (v, cls) => (v > 0 ? `<span class="seg ${cls}" style="width:${(v / total) * 100}%"></span>` : '');
@@ -97,7 +98,7 @@ export function healthCard() {
   const tipsHtml = tips.length ? `
     <ul class="tips">${tips.map((t) => `<li><strong>${esc(t.names.join('・'))}</strong> <span class="muted">月${yen(t.amount)}（手取りの${pct(t.amount)}）</span><br>${esc(t.tip)}</li>`).join('')}</ul>` : '';
   return `
-    <h2>家計の診断</h2>
+    <h2>家計の診断${helpBtn('health')}</h2>
     <div class="health ${h.level}">
       <p class="health-label">${h.emoji} ${h.label}</p>
       <p>${h.description}</p>
@@ -262,7 +263,7 @@ export function simResult() {
         <p class="note">同じ金額を積立せず現金で置いておいた場合と比べて、想定上は${yen(target.gain)}の差になります。</p>
       </div>` : ''}
 
-    <h2>このペースで続けると</h2>
+    <h2>このペースで続けると${helpBtn('future')}</h2>
     ${hasInv ? `<p class="legend"><span><i class="dot save"></i>貯金</span><span><i class="dot principal"></i>投資元本</span><span><i class="dot gain"></i>想定運用益</span></p>` : ''}
     <ul class="sim-list">
       ${rows.map((r) => `

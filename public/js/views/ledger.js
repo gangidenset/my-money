@@ -5,6 +5,7 @@ import { ds, state, ui, esc, catMap, groupOf, payday, currentPeriod, allow, curr
 import { showToast, moneyValue, moneyAttrs } from '../ui.js';
 import { chartsView } from '../views/charts.js';
 import { expenseRow } from '../views/home.js';
+import { helpBtn } from '../guides.js';
 
 /* ---------- 家計簿 ---------- */
 
@@ -27,9 +28,9 @@ export function ledgerView() {
   return `
     ${modeToggle}
     <section class="card entry ${editing ? 'is-editing' : ''}">
-      <h2>${editing ? '✏️ 支出を編集' : '支出を記録'}</h2>
+      <h2>${editing ? '✏️ 支出を編集' : '支出を記録'}${helpBtn(editing ? 'edit' : 'record')}</h2>
       ${ui.quickList.length ? `<div class="quick">
-        <p class="quick-label">よく使う（タップですぐ記録）</p>
+        <p class="quick-label">よく使う（タップですぐ記録）${helpBtn('quick', 'small')}</p>
         <div class="quick-list">
           ${ui.quickList.map((q, i) => `<button type="button" class="quick-btn" data-action="quick-add" data-index="${i}">
             <span>${catMap()[q.category]?.icon ?? '❔'} ${esc(q.shop || catMap()[q.category]?.name || '')}</span><strong>${yen(q.amount)}</strong>
@@ -60,7 +61,7 @@ export function ledgerView() {
     <section class="card">
       <div class="month-nav">
         <button class="icon-btn" data-action="month" data-delta="-1" aria-label="前の期間">‹</button>
-        <h2>${periodLabel(period)}</h2>
+        <h2>${periodLabel(period)}${helpBtn('edit')}</h2>
         <button class="icon-btn" data-action="month" data-delta="1" aria-label="次の期間">›</button>
       </div>
       <dl class="flow compact">

@@ -21,11 +21,14 @@
   <header class="topbar">
     <h1 id="page-title">ホーム</h1>
     <span class="offline-badge" id="offline-badge" hidden>オフライン</span>
+    <button type="button" class="topbar-help" id="topbar-help" aria-label="この画面の使い方">?</button>
   </header>
 
   <main id="main" class="main"></main>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <dialog class="guide-sheet" id="guide" aria-labelledby="guide-title"></dialog>
 
   <nav class="nav" aria-label="メインメニュー">
     <a href="#/home" data-route="home"><span aria-hidden="true">🏠</span>ホーム</a>

@@ -9,6 +9,7 @@ import { ledgerView, endEdit, saveExpense, addExpense, ledgerActions } from './v
 import { summaryCard, suggestCard, allocCard, budgetView, goalResultHtml, goalsFoot, bonusCard, bonusBreakdown, budgetActions } from './views/budget.js';
 import { simView, healthCard, goalResult, raiseResult, savingResult, nisaCheckHtml, simResult, simActions } from './views/sim.js';
 import { updateOnlineBadge, settingsView, settingsActions } from './views/settings.js';
+import { guideActions, openScreenGuide } from './guides.js';
 
 /* ---------- ルーティング・描画 ---------- */
 
@@ -138,7 +139,10 @@ $main.addEventListener('keydown', (ev) => {
 
 /* ---------- ボタン操作：各画面の操作表に振り分ける ---------- */
 
-const actions = { ...homeActions, ...ledgerActions, ...budgetActions, ...simActions, ...settingsActions };
+const actions = { ...homeActions, ...ledgerActions, ...budgetActions, ...simActions, ...settingsActions, ...guideActions };
+
+// 画面右上の「？」：いま開いている画面の使い方
+document.getElementById('topbar-help').addEventListener('click', () => openScreenGuide(currentRoute()));
 
 $main.addEventListener('click', async (ev) => {
   const btn = ev.target.closest('[data-action]');

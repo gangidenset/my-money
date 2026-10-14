@@ -4,6 +4,7 @@ import {
 } from '../calc.js';
 import { ds, state, esc, catMap, plan, payday, history, freeAlloc, visitsPerWeek, render, flushSaves, bonus, logGoal, unlogGoal } from '../core.js';
 import { showToast, moneyInput, signed } from '../ui.js';
+import { helpBtn } from '../guides.js';
 
 /* ---------- 予算（収入・固定費・生活費・貯蓄） ---------- */
 
@@ -34,7 +35,7 @@ export function suggestCard() {
     <section class="card" id="suggest-card">
       <details ${untouched ? 'open' : ''}>
         <summary>手取り${yen(p.income)}からの予算の目安</summary>
-        <p class="note">一般的な配分をもとにした初期目安です。正解ではないので、暮らしに合わせて調整してください。${hist ? '記録がある項目は、あなたの実績を優先しています。' : '家計簿の記録が貯まると、あなたの実績平均を優先して提案します。'}</p>
+        <p class="note">${helpBtn('suggest', 'small')}一般的な配分をもとにした初期目安です。正解ではないので、暮らしに合わせて調整してください。${hist ? '記録がある項目は、あなたの実績を優先しています。' : '家計簿の記録が貯まると、あなたの実績平均を優先して提案します。'}</p>
         <dl class="flow suggest">
           <div><dt>固定費 <small class="tag muted">目安</small></dt><dd>${yen(sg.fixed)}<small>今 ${yen(p.fixed)}</small></dd></div>
           ${Object.entries(sg.living).map(([id, x]) => `<div><dt>${esc(BUDGET_LABELS[id])} ${src(x)}</dt><dd>${yen(x.amount)}</dd></div>`).join('')}
@@ -57,12 +58,12 @@ export function allocCard() {
 
   if (p.free <= 0) {
     return `<section class="card" id="alloc-card">
-      <h2>自由に使えるお金の使い道</h2>
+      <h2>自由に使えるお金の使い道${helpBtn('alloc')}</h2>
       <p class="muted">自由に使えるお金がまだないため配分できません。収入・固定費・貯蓄目標を入力すると設定できます。</p>
     </section>`;
   }
   return `<section class="card" id="alloc-card">
-    <h2>自由に使えるお金の使い道</h2>
+    <h2>自由に使えるお金の使い道${helpBtn('alloc')}</h2>
     <p class="note lead">貯蓄・積立を確保したあとの<strong>${yen(p.free)}</strong>を、何に何%使うかを決めます。</p>
     ${cats.map((c) => {
       const it = byCat[c.id];
@@ -96,7 +97,7 @@ export function budgetView() {
     <div id="suggest-slot">${suggestCard()}</div>
 
     <section class="card">
-      <h2>収入</h2>
+      <h2>収入${helpBtn('income')}</h2>
       ${moneyInput('profile.takeHome', pr.takeHome, '手取り月収', { hint: '計算の基準になります' })}
       ${moneyInput('profile.sideIncome', pr.sideIncome, '副業収入（月）')}
       ${moneyInput('profile.otherIncome', pr.otherIncome, 'その他収入（月）')}
@@ -108,7 +109,7 @@ export function budgetView() {
       <p class="note">毎月に換算すると、ボーナスの1/12を毎月の収入に加えます。別管理なら、下の「ボーナスの使い道」で貯金や目的別の貯金に割り振れます。</p>
 
       <label class="field payday-field">
-        <span class="field-label">給料日<small>この日から次の給料日の前日までを「1か月」として計算します</small></span>
+        <span class="field-label">給料日${helpBtn('payday', 'small')}<small>この日から次の給料日の前日までを「1か月」として計算します</small></span>
         <select data-bind="profile.payday" data-num>
           ${Array.from({ length: MAX_PAYDAY }, (_, i) => i + 1).map((d) => `<option value="${d}" ${payday() === d ? 'selected' : ''}>${d === 1 ? '1日（暦どおり・月末締め）' : `${d}日`}</option>`).join('')}
         </select>
@@ -121,7 +122,7 @@ export function budgetView() {
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>固定費</h2><span class="muted">合計 <strong data-live="fixed">${yen(plan().fixed)}</strong></span></div>
+      <div class="card-head"><h2>固定費${helpBtn('fixed')}</h2><span class="muted">合計 <strong data-live="fixed">${yen(plan().fixed)}</strong></span></div>
       ${state.fixedCosts.map((c, i) => `
         <div class="fixed-row">
           <input type="text" class="fixed-name" data-bind="fixedCosts.${i}.name" value="${esc(c.name)}" aria-label="項目名" maxlength="20">
@@ -138,7 +139,7 @@ export function budgetView() {
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>生活費予算</h2><span class="muted">合計 <strong data-live="living">${yen(plan().living)}</strong></span></div>
+      <div class="card-head"><h2>生活費予算${helpBtn('living')}</h2><span class="muted">合計 <strong data-live="living">${yen(plan().living)}</strong></span></div>
       ${state.budgets.map((b, i) => moneyInput(`budgets.${i}.monthlyLimit`, b.monthlyLimit, BUDGET_LABELS[b.category] || catMap()[b.category]?.name || b.category, { hint: histHint(b.category) })).join('')}
       <p class="note">外食・趣味・衣服などは下の「自由に使えるお金の使い道」で配分します。</p>
     </section>
@@ -146,7 +147,7 @@ export function budgetView() {
     ${allocCard()}
 
     <section class="card">
-      <h2>貯蓄</h2>
+      <h2>貯蓄${helpBtn('savings')}</h2>
       ${moneyInput('simulation.monthlySavings', state.simulation.monthlySavings, '毎月の貯蓄目標', { hint: '目的別の貯金とは別枠' })}
       ${moneyInput('profile.currentSavings', pr.currentSavings, '現在の貯金額', { hint: '目的別に貯めている分も含めた合計' })}
     </section>
@@ -155,7 +156,7 @@ export function budgetView() {
     <div id="bonus-slot">${bonusCard()}</div>
 
     <section class="card">
-      <h2>積立投資（NISAなど）</h2>
+      <h2>積立投資（NISAなど）${helpBtn('invest')}</h2>
       ${moneyInput('simulation.monthlyInvestment', state.simulation.monthlyInvestment, '毎月の積立額')}
       ${moneyInput('profile.currentInvestment', pr.currentInvestment, '現在の投資残高')}
       <p class="note">利回りや将来の見込みは「将来」タブで確認できます。</p>
@@ -174,7 +175,7 @@ export const GOAL_PRESETS = [
 
 export function goalsCard() {
   return `<section class="card" id="goals-card">
-    <h2>🎯 目的別の貯金</h2>
+    <h2>🎯 目的別の貯金${helpBtn('goals')}</h2>
     <p class="note lead">車・引っ越し・家具など、使う時期が決まっているお金を目的ごとに貯めます。運用益は考えず、<strong>購入予定月の前月まで</strong>に貯め切るための毎月の金額を逆算します。</p>
     ${state.goals.map(goalRow).join('')}
     <div class="chips">${GOAL_PRESETS.map((x) => `<button class="chip" data-action="add-goal" data-name="${esc(x.name)}" data-icon="${x.icon}">＋ ${x.icon} ${esc(x.name)}</button>`).join('')}</div>
@@ -262,7 +263,7 @@ export function bonusCard() {
   // 支給月をすべて外しても選び直せるよう、別管理で金額があればカードは出す
   if (state.profile.bonusMode === 'monthly' || !(n(state.profile.bonus) > 0)) return '';
   return `<section class="card" id="bonus-card">
-    <h2>🎁 ボーナスの使い道</h2>
+    <h2>🎁 ボーナスの使い道${helpBtn('bonus')}</h2>
     <div class="field">
       <span class="field-label">支給月</span>
       <div class="month-chips" role="group" aria-label="ボーナスの支給月">

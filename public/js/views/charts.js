@@ -2,6 +2,7 @@ import {
   n, sum, inPeriod, periodLabel, periodHistory, niceScale, compactYen, yen,
 } from '../calc.js';
 import { state, $main, esc, catMap, groupOf, catLabel, planFor, payday } from '../core.js';
+import { helpBtn } from '../guides.js';
 
 /* ---------- グラフ ---------- */
 
@@ -61,7 +62,7 @@ export function categoryChart(period) {
     <section class="card chart-card">
       <div class="month-nav">
         <button class="icon-btn" data-action="month" data-delta="-1" aria-label="前の期間">‹</button>
-        <h2>${periodLabel(period)}</h2>
+        <h2>${periodLabel(period)}${helpBtn('charts')}</h2>
         <button class="icon-btn" data-action="month" data-delta="1" aria-label="次の期間">›</button>
       </div>
       <p class="chart-title">カテゴリ別の支出 <span class="muted">合計 ${yen(total)}</span></p>

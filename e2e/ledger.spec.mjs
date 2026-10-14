@@ -25,7 +25,7 @@ test('支出の編集と、削除の取り消し', async ({ page }) => {
   await page.getByRole('button', { name: '更新する' }).click();
   expect((await stored(page, 'expenses'))[0].amount).toBe(2500);
 
-  await page.getByRole('button', { name: '削除' }).first().click();
+  await page.getByRole('button', { name: '2,500円の支出を削除' }).click();
   await expect(page.locator('#toast')).toContainText('削除しました');
   expect(await stored(page, 'expenses')).toHaveLength(0);
   await page.locator('#toast').getByRole('button', { name: '元に戻す' }).click();
