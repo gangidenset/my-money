@@ -29,8 +29,8 @@ export const expense = (id, date, category, amount, shop = '') => ({ id, date, c
  * アプリを開く。data を渡すと最初の読み込み前に端末内の保存データとして入れる
  * （再読み込みしても入れ直さないので、アプリでの変更はそのまま残る）。
  */
-export async function openApp(page, { data = null, hash = '#/home' } = {}) {
-  await page.clock.setFixedTime(NOW);
+export async function openApp(page, { data = null, hash = '#/home', now = NOW } = {}) {
+  await page.clock.setFixedTime(now);
   if (data) {
     await page.addInitScript(({ data, prefix }) => {
       if (sessionStorage.getItem('e2e-seeded')) return;

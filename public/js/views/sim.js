@@ -2,10 +2,16 @@ import { BUDGET_LABELS } from '../dataService.js';
 import {
   n, futureSavings, futureInvestment, nisaCheck, requiredMonthly, monthsToReach, formatMonths, incomeGrowth, householdHealth, fixedCostTips, savingEffect, earmarkedSavings, yen,
 } from '../calc.js';
-import { ds, state, esc, catMap, plan, generalSavings, freeAlloc, render } from '../core.js';
+import { ds, state, esc, catMap, plan, basePlan, generalSavings, freeAlloc, render, bonus } from '../core.js';
 import { moneyValue, moneyAttrs, numberInput, moneyInput } from '../ui.js';
 
 /* ---------- シミュレーション ---------- */
+
+/** ボーナスから貯金に回す年額（別管理のとき） */
+export const bonusSavingsPerYear = () => {
+  const b = bonus();
+  return b.active ? b.toSavings * b.months.length : 0;
+};
 
 export const SIM_YEARS = [1, 3, 5, 10, 20];
 export const investYears = () => Math.min(50, Math.max(1, Math.round(n(state.simulation.investYears)) || 20));
@@ -13,7 +19,7 @@ export const investYears = () => Math.min(50, Math.max(1, Math.round(n(state.sim
 export function projection(years) {
   const pr = state.profile;
   const sim = state.simulation;
-  const savings = futureSavings(generalSavings(), sim.monthlySavings, years);
+  const savings = futureSavings(generalSavings(), sim.monthlySavings, years, bonusSavingsPerYear());
   const inv = futureInvestment(pr.currentInvestment, sim.monthlyInvestment, sim.annualReturn, years);
   return { years, savings, ...inv, total: savings + inv.value };
 }
@@ -29,7 +35,7 @@ export function simView() {
       <h2>貯金</h2>
       ${moneyInput('profile.currentSavings', pr.currentSavings, '現在の貯金額')}
       ${moneyInput('simulation.monthlySavings', sim.monthlySavings, '毎月の貯蓄額')}
-      <p class="note">年間 <strong data-live="annual">${yen(n(sim.monthlySavings) * 12)}</strong> 貯まる計算です。</p>
+      <p class="note">年間 <strong data-live="annual">${yen(n(sim.monthlySavings) * 12)}</strong> 貯まる計算です。${bonusSavingsPerYear() > 0 ? `ボーナスから貯金に回す年${yen(bonusSavingsPerYear())}も加えて計算します。` : ''}</p>
       ${state.goals.length ? `<p class="note">目的別の貯金（車・引っ越しなど）は使う予定のお金なので、ここでの将来の資産には含めていません（今の残高 ${yen(earmarkedSavings(state.goals))} を除いて計算）。</p>` : ''}
     </section>
 
@@ -79,7 +85,8 @@ export function simView() {
 }
 
 export function healthCard() {
-  const p = plan();
+  // 家計の診断は、繰り越しを含まない毎月の計画で行う
+  const p = basePlan();
   const h = householdHealth(p);
   if (!h) return '<h2>家計の診断</h2><p class="muted">予算タブで手取り収入を入力すると診断できます。</p>';
   const pos = Math.max(0, p.free);
@@ -128,9 +135,10 @@ export function goalResult() {
   const need = requiredMonthly(target, current, years);
   const needInvested = rate > 0 ? requiredMonthly(target, current, years, rate) : null;
   const monthlyNow = n(sim.monthlySavings) + n(sim.monthlyInvestment);
-  const proj = futureSavings(generalSavings(), sim.monthlySavings, years)
+  const proj = futureSavings(generalSavings(), sim.monthlySavings, years, bonusSavingsPerYear())
     + futureInvestment(pr.currentInvestment, sim.monthlyInvestment, rate, years).value;
-  const reachAt = monthsToReach(target, { ...pr, ...sim, currentSavings: generalSavings() });
+  // ボーナスからの貯金は、月あたりにならして到達時期を計算する
+  const reachAt = monthsToReach(target, { ...pr, ...sim, currentSavings: generalSavings(), monthlySavings: n(sim.monthlySavings) + bonusSavingsPerYear() / 12 });
   const free = Math.max(0, plan().free);
 
   let verdict;

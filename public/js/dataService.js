@@ -1,6 +1,8 @@
 // Service 層：アプリのデータ構造（UserProfile / FixedCost / Expense / Budget / Simulation）を扱う。
 // UI はこのモジュールだけを呼び、保存先（storage.js）を直接触らない。
 
+import { monthlyPlan, n } from './calc.js';
+
 export const DEFAULT_CATEGORIES = [
   // group: 'living' = 生活費予算から使う / 'free' = 自由に使えるお金から使う
   { id: 'food', name: '食費', icon: '🍚', group: 'living' },
@@ -48,6 +50,9 @@ const DEFAULT_PROFILE = {
   bonus: 0, // 年間ボーナス（手取り）
   bonusMode: 'separate', // 'monthly' = 毎月換算 / 'separate' = 別管理
   payday: 1, // 給料日（1〜28）。この日から翌月の前日までを予算の1か月とする。1 = 暦どおり
+  bonusMonths: [6, 12], // ボーナスの支給月（別管理のとき）
+  bonusPlan: { savings: 0 }, // ボーナス1回あたり、貯金に回す額（目的別へは各目的の bonusPerPayout）
+  bonusReceived: [], // 受け取りを記録した月（YYYY-MM）
   otherIncome: 0,
   sideIncome: 0,
   currentSavings: 0,
@@ -74,10 +79,15 @@ const DEFAULT_GOAL = {
 /* ---------- データの版管理 ---------- */
 
 /** 保存データの形式の版。形式を変えたら上げて、MIGRATIONS に変換を追加する */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /** バックアップ・復元の対象になる保存データ（端末ごとの meta などは含めない） */
-export const DATA_KEYS = ['profile', 'fixedCosts', 'budgets', 'simulation', 'goal', 'goals', 'allocations', 'customCategories', 'expenses'];
+export const DATA_KEYS = [
+  'profile', 'fixedCosts', 'budgets', 'simulation', 'goal', 'goals', 'allocations', 'customCategories', 'expenses',
+  'planHistory', // 収入・固定費などの設定の履歴（設定を変えた期間から反映）
+  'settlements', // 期間の締め（余ったお金・足りなかったお金をどうしたか）
+  'goalLog', // 目的別の貯金に入れた記録（毎月の積立・ボーナス・繰り越し）
+];
 
 const toInt = (v) => {
   const x = Math.round(Number(v));
@@ -107,6 +117,29 @@ export const MIGRATIONS = {
       })));
     }
   },
+};
+
+MIGRATIONS[3] = async (st) => {
+  // v2 → v3：今の設定を、設定の履歴の最初の記録にする（それ以前の期間もこの設定で計算する）
+  if ((await st.get('planHistory')) != null) return;
+  const plan = monthlyPlan({
+    profile: { ...DEFAULT_PROFILE, ...((await st.get('profile')) ?? {}) },
+    fixedCosts: (await st.get('fixedCosts')) ?? [],
+    budgets: (await st.get('budgets')) ?? [],
+    simulation: (await st.get('simulation')) ?? {},
+  });
+  // 目的別の貯金の、最後の積立を記録として残す（期間の締めで「実際に積み立てた額」として使う）
+  if ((await st.get('goalLog')) == null) {
+    const goals = (await st.get('goals')) ?? [];
+    await st.set('goalLog', goals.filter((g) => g.lastContributionMonth && n(g.lastContributionAmount) > 0).map((g) => ({
+      id: `m3-${g.id}`, goalId: g.id, date: `${g.lastContributionMonth}-01`, amount: n(g.lastContributionAmount), source: 'monthly',
+    })));
+  }
+  await st.set('planHistory', [{
+    from: '0000-01-01',
+    income: Math.round(plan.income), fixed: Math.round(plan.fixed), living: Math.round(plan.living),
+    savings: Math.round(plan.savings), investment: Math.round(plan.investment),
+  }]);
 };
 
 async function hasAnyData(storage) {
@@ -153,7 +186,7 @@ export function createDataService(storage) {
 
   return {
     async getProfile() {
-      return { ...DEFAULT_PROFILE, ...(await read('profile', {})) };
+      return { ...structuredClone(DEFAULT_PROFILE), ...(await read('profile', {})) };
     },
     saveProfile: (profile) => storage.set('profile', profile),
 
@@ -172,12 +205,12 @@ export function createDataService(storage) {
     saveBudgets: (list) => storage.set('budgets', list),
 
     async getSimulation() {
-      return { ...DEFAULT_SIMULATION, ...(await read('simulation', {})) };
+      return { ...structuredClone(DEFAULT_SIMULATION), ...(await read('simulation', {})) };
     },
     saveSimulation: (sim) => storage.set('simulation', sim),
 
     async getGoal() {
-      return { ...DEFAULT_GOAL, ...(await read('goal', {})) };
+      return { ...structuredClone(DEFAULT_GOAL), ...(await read('goal', {})) };
     },
     saveGoal: (goal) => storage.set('goal', goal),
 
@@ -232,6 +265,15 @@ export function createDataService(storage) {
       if (!list.some((e) => e.id === item.id)) list.push(item);
       await storage.set('expenses', list);
     },
+
+    listPlanHistory: () => read('planHistory', []),
+    savePlanHistory: (list) => storage.set('planHistory', list),
+
+    getSettlements: () => read('settlements', {}),
+    saveSettlements: (map) => storage.set('settlements', map),
+
+    listGoalLog: () => read('goalLog', []),
+    saveGoalLog: (list) => storage.set('goalLog', list),
 
     // 端末ごとの情報（使い始めた日・最後のバックアップ日）。バックアップには含めない
     getMeta: () => read('meta', {}),

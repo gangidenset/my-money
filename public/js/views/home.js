@@ -1,7 +1,11 @@
 import {
-  n, parseDateKey, addDays, judgeSpend, budgetAlerts, householdHealth, backupReminder, parseMoney, formatMoneyText, yen,
+  n, parseDateKey, addDays, toDateKey, judgeSpend, budgetAlerts, householdHealth, backupReminder, parseMoney, formatMoneyText, yen,
+  periodLabel, goalPlan, bonusDueThisMonth,
 } from '../calc.js';
-import { ds, state, ui, esc, catMap, catLabel, plan, payday, allow, freeAlloc, visitsPerWeek, categoryUsage, render } from '../core.js';
+import {
+  ds, state, ui, esc, catMap, catLabel, plan, basePlan, payday, allow, freeAlloc, visitsPerWeek, categoryUsage, render,
+  pendingSettlement, bonus, logGoal, unlogGoal,
+} from '../core.js';
 import { showToast, moneyAttrs, bar, signed } from '../ui.js';
 
 /* ---------- ホーム ---------- */
@@ -64,7 +68,7 @@ export function homeView() {
 
     <p class="advice ${over ? 'caution' : ''}">${headline}</p>
     ${alerts.length ? `<ul class="alerts">${alerts.map((x) => `<li class="${x.level}">${esc(x.message)}</li>`).join('')}</ul>` : ''}
-    ${backupBanner()}
+    ${todoCard()}
 
     <section class="card">
       <h2>この出費、大丈夫？</h2>
@@ -86,6 +90,7 @@ export function homeView() {
         <div><dt>貯蓄予定</dt><dd>−${yen(p.savings)}</dd></div>
         ${p.investment > 0 ? `<div><dt>積立投資</dt><dd>−${yen(p.investment)}</dd></div>` : ''}
         ${p.goals > 0 ? `<div><dt>目的別の積立</dt><dd>−${yen(p.goals)}</dd></div>` : ''}
+        ${p.carry ? `<div><dt>先月からの繰り越し</dt><dd>${p.carry > 0 ? '+' : '−'}${yen(Math.abs(p.carry))}</dd></div>` : ''}
         <div class="total"><dt>自由に使えるお金</dt><dd>${signed(p.free)}</dd></div>
       </dl>
       ${p.free < 0 ? `<p class="note caution">固定費・生活費・貯蓄${p.goals > 0 ? "・目的別の積立" : ""}の合計が収入を${yen(-p.free)}上回っています。予算タブで見直してみましょう。</p>` : ''}
@@ -133,7 +138,7 @@ export function allocHomeCard(usage) {
 }
 
 export function healthChip() {
-  const h = householdHealth(plan());
+  const h = householdHealth(basePlan());
   if (!h) return '';
   return `<a class="health-chip ${h.level}" href="#/sim">
     <span>${h.emoji} 家計の状態：<strong>${h.label}</strong></span>
@@ -156,19 +161,132 @@ export function expenseRow(e) {
 export function backupBanner() {
   const r = backupReminder(state.meta, new Date(), { hasData: state.expenses.length > 0 });
   if (!r) return '';
-  return `<section class="backup-banner" role="status">
+  return `<div class="todo-item backup-banner" role="status">
     <p>💾 ${r.never ? 'まだバックアップがありません。' : `最後のバックアップから${r.days}日たちました。`}スマホの故障や機種変更に備えて保存しておきましょう。</p>
     <div class="btn-row">
       <button class="btn primary" data-action="export">今すぐ保存</button>
       <button class="btn" data-action="snooze-backup">あとで</button>
     </div>
+  </div>`;
+}
+
+/* ---------- 今月のやること（先月の締め・ボーナス・目的別の積立・バックアップ） ---------- */
+
+export function todoCard() {
+  const items = [settlementItem(), bonusItem(), goalsItem(), backupBanner()].filter(Boolean);
+  if (!items.length) return '';
+  return `<section class="card todo-card" aria-label="今月のやること">
+    <h2>📌 今月のやること</h2>
+    ${items.join('')}
   </section>`;
+}
+
+/** 先月の余ったお金（足りなかったお金）をどうするか */
+function settlementItem() {
+  const s = pendingSettlement();
+  if (!s) return '';
+  const label = periodLabel(s.period);
+  if (s.leftover < 0) {
+    return `<div class="todo-item settle">
+      <p>先月（${label}）は、予定より<strong>${yen(-s.leftover)}</strong>多く使いました。どうしますか？</p>
+      <div class="settle-actions">
+        <button class="btn" data-action="settle" data-kind="cover">貯金から補てんした</button>
+        <button class="btn" data-action="settle" data-kind="carry">今月の予算から差し引く</button>
+        <button class="btn ghost" data-action="settle" data-kind="none">記録しない</button>
+      </div>
+    </div>`;
+  }
+  const goals = state.goals.filter((g) => n(g.targetAmount) > 0 && goalPlan(g, new Date(), bonus()).status !== 'done');
+  return `<div class="todo-item settle">
+    <p>先月（${label}）は、自由に使えるお金が<strong>${yen(s.leftover)}</strong>余りました。どうしますか？</p>
+    <div class="settle-actions">
+      <button class="btn" data-action="settle" data-kind="savings">貯金に回す</button>
+      <button class="btn" data-action="settle" data-kind="carry">今月に繰り越す</button>
+      ${goals.length ? `<div class="settle-goal">
+        <select id="settle-goal" aria-label="入れる目的">${goals.map((g) => `<option value="${esc(g.id)}">${g.icon} ${esc(g.name)}</option>`).join('')}</select>
+        <button class="btn" data-action="settle" data-kind="goal">目的別へ入れる</button>
+      </div>` : ''}
+      <button class="btn ghost" data-action="settle" data-kind="none">記録しない</button>
+    </div>
+  </div>`;
+}
+
+function bonusItem() {
+  if (!bonusDueThisMonth(bonus())) return '';
+  return `<div class="todo-item">
+    <p>🎁 今月はボーナス月です。受け取ったら記録すると、予算タブで決めた使い道（貯金・目的別）に割り振ります。</p>
+    <button class="btn primary block" data-action="receive-bonus">受け取った（割り振りを記録）</button>
+  </div>`;
+}
+
+/** 今月まだ積み立てていない目的別の貯金 */
+function goalsItem() {
+  const b = bonus();
+  const due = state.goals
+    .map((g) => ({ g, gp: goalPlan(g, new Date(), b) }))
+    .filter(({ gp }) => gp.status === 'active' && gp.monthly > 0 && !gp.contributed);
+  if (!due.length) return '';
+  return `<div class="todo-item">
+    <p>🎯 目的別の積立（今月分）</p>
+    <ul class="todo-goals">
+      ${due.map(({ g, gp }) => `<li>
+        <span>${g.icon} ${esc(g.name)} <strong>${yen(gp.monthly)}</strong></span>
+        <button class="btn small" data-action="contribute-goal" data-id="${esc(g.id)}">積み立てた</button>
+      </li>`).join('')}
+    </ul>
+  </div>`;
 }
 
 
 /* ---------- ボタン操作（data-action） ---------- */
 
 export const homeActions = {
+  /** 先月の締め：savings / cover（貯金を増減）・goal（目的別へ）・carry（今月へ繰り越し）・none */
+  'settle': async (btn, ev) => {
+    const s = pendingSettlement();
+    if (!s) return;
+    const kind = btn.dataset.kind;
+    const amount = s.leftover;
+    const before = { savings: state.profile.currentSavings, settlements: state.settlements };
+    let goal = null;
+    let goalSavedBefore = 0;
+    let logId = null;
+    let message;
+    if (kind === 'savings' || kind === 'cover') {
+      state.profile.currentSavings = Math.max(0, n(state.profile.currentSavings) + amount);
+      message = amount > 0 ? `${yen(amount)}を貯金に回しました` : `貯金から${yen(-amount)}補てんしました`;
+    } else if (kind === 'goal') {
+      goal = state.goals.find((g) => g.id === document.getElementById('settle-goal')?.value);
+      if (!goal) return;
+      goalSavedBefore = goal.saved;
+      goal.saved = n(goal.saved) + amount;
+      // 目的別の残高は現在の貯金額の内訳なので、貯金額も同じだけ増やす
+      state.profile.currentSavings = n(state.profile.currentSavings) + amount;
+      logId = await logGoal({ goalId: goal.id, date: toDateKey(new Date()), amount, source: 'leftover' });
+      message = `${goal.name}に${yen(amount)}入れました`;
+    } else if (kind === 'carry') {
+      message = amount > 0 ? `${yen(amount)}を今月に繰り越しました` : `今月の予算から${yen(-amount)}差し引きます`;
+    } else {
+      message = '先月の分は記録せずに閉じました';
+    }
+    state.settlements = { ...state.settlements, [s.period.startKey]: { action: kind, amount, goalId: goal?.id ?? null, at: new Date().toISOString() } };
+    await Promise.all([ds.saveProfile(state.profile), ds.saveGoals(state.goals), ds.saveSettlements(state.settlements)]);
+    render();
+    showToast(message, {
+      label: '取り消す',
+      run: async () => {
+        state.profile.currentSavings = before.savings;
+        state.settlements = before.settlements;
+        if (goal) {
+          goal.saved = goalSavedBefore;
+          await unlogGoal(logId);
+        }
+        await Promise.all([ds.saveProfile(state.profile), ds.saveGoals(state.goals), ds.saveSettlements(state.settlements)]);
+        render();
+        showToast('取り消しました');
+      },
+    });
+  },
   'snooze-backup': async (btn, ev) => {
     state.meta.snoozedUntil = addDays(new Date(), 7).toISOString();
     await ds.saveMeta(state.meta);

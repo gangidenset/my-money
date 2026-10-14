@@ -561,3 +561,25 @@ input[data-money] { text-align: right; font-variant-numeric: tabular-nums; }
 .goals-total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); font-size: 0.9rem; }
 .goals-total strong { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 #goals-card .chips { margin-top: 12px; }
+
+/* ---- 今月のやること・期間の締め・ボーナス ---- */
+.todo-card h2 { margin-bottom: 4px; }
+.todo-item { padding: 12px 0 0; margin-top: 12px; border-top: 1px solid var(--border); }
+.todo-item p { margin: 0; font-size: 0.9rem; }
+.todo-item .btn.block, .todo-item .btn-row { margin-top: 10px; }
+.todo-card .backup-banner { background: none; border: 0; box-shadow: none; border-radius: 0; padding: 12px 0 0; border-top: 1px solid var(--border); }
+.settle-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.settle-goal { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.settle-actions .btn { font-size: 0.88rem; padding: 8px 10px; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); font-weight: 400; }
+.btn.small { min-height: 36px; padding: 4px 12px; font-size: 0.84rem; }
+.todo-goals { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.todo-goals li { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.9rem; }
+.todo-goals strong { font-variant-numeric: tabular-nums; }
+.month-chips { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.chip-toggle {
+  min-height: 36px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--muted); font: inherit; font-size: 0.8rem; cursor: pointer; padding: 0;
+}
+.chip-toggle.selected { background: var(--primary-soft); border-color: var(--primary); color: var(--text); font-weight: 700; }
+.bonus-only[hidden] { display: none; }

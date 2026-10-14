@@ -1,12 +1,12 @@
 import {
   n, judgeSpend, parseMoney, yen,
 } from './calc.js';
-import { ds, state, ui, $main, plan, allow, freeAlloc, visitsPerWeek, loadAll, prepareData, currentRoute, setRenderer, render, schedulePersist, flushSaves, setByPath } from './core.js';
+import { ds, state, ui, $main, plan, allow, freeAlloc, visitsPerWeek, loadAll, prepareData, currentRoute, setRenderer, render, schedulePersist, flushSaves, setByPath, bonus, recordPlanSnapshot } from './core.js';
 import { formatMoneyField } from './ui.js';
 import { hideTip } from './views/charts.js';
 import { homeView, homeActions } from './views/home.js';
 import { ledgerView, endEdit, saveExpense, addExpense, ledgerActions } from './views/ledger.js';
-import { summaryCard, suggestCard, allocCard, budgetView, goalResultHtml, goalsFoot, budgetActions } from './views/budget.js';
+import { summaryCard, suggestCard, allocCard, budgetView, goalResultHtml, goalsFoot, bonusCard, bonusBreakdown, budgetActions } from './views/budget.js';
 import { simView, healthCard, goalResult, raiseResult, savingResult, nisaCheckHtml, simResult, simActions } from './views/sim.js';
 import { updateOnlineBadge, settingsView, settingsActions } from './views/settings.js';
 
@@ -22,6 +22,7 @@ const routes = {
 
 function renderApp() {
   hideTip();
+  recordPlanSnapshot(); // 設定を直接保存した操作のあとも、設定の履歴を更新する
   const r = currentRoute();
   document.getElementById('page-title').textContent = routes[r].title;
   document.querySelectorAll('.nav a').forEach((a) => a.toggleAttribute('aria-current', a.dataset.route === r));
@@ -68,6 +69,17 @@ function refreshLive() {
     const el = document.getElementById(`goal-res-${g.id}`);
     if (el) el.innerHTML = goalResultHtml(g);
   }
+  // ボーナスの使い道：入力中はカードを作り直さず、内訳だけ更新する
+  const bonusSlot = document.getElementById('bonus-slot');
+  if (bonusSlot) {
+    if (bonusSlot.contains(document.activeElement)) {
+      const el = document.getElementById('bonus-breakdown');
+      if (el) el.innerHTML = bonusBreakdown();
+    } else {
+      bonusSlot.innerHTML = bonusCard();
+    }
+  }
+  document.querySelectorAll('.bonus-only').forEach((el) => (el.hidden = !bonus().active));
 }
 
 function onBoundInput(t) {

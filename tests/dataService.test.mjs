@@ -70,3 +70,21 @@ test('書き出し：今の版と、バックアップ対象の項目だけを�
   assert.equal(out.schemaVersion, SCHEMA_VERSION);
   assert.deepEqual(Object.keys(out.data), DATA_KEYS);
 });
+
+test('v2 → v3：今の設定を、設定の履歴の最初の記録にする', async () => {
+  const st = createMemoryAdapter();
+  await seed(st, {
+    schemaVersion: 2,
+    profile: { takeHome: 300000 },
+    fixedCosts: [{ amount: 80000 }, { amount: 5000 }],
+    budgets: [{ monthlyLimit: 40000 }],
+    simulation: { monthlySavings: 60000, monthlyInvestment: 10000 },
+  });
+  await migrateStorage(st);
+  assert.deepEqual(await st.get('planHistory'), [{ from: '0000-01-01', income: 300000, fixed: 85000, living: 40000, savings: 60000, investment: 10000 }]);
+  // 2回目は何もしない
+  await st.set('schemaVersion', 2);
+  await st.set('planHistory', [{ from: '2026-01-01', income: 1 }]);
+  await migrateStorage(st);
+  assert.deepEqual(await st.get('planHistory'), [{ from: '2026-01-01', income: 1 }]);
+});

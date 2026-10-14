@@ -1,7 +1,8 @@
 import { createDefaultStorage } from './storage.js';
-import { createDataService } from './dataService.js';
+import { createDataService, uid } from './dataService.js';
 import {
   n, toDateKey, monthlyPlan, budgetPeriod, inPeriod, allowance, allocate, weekStartKey, historyAverages, earmarkedSavings,
+  bonusSchedule, planAt, upsertPlanSnapshot, periodLeftover, goalsPaidIn,
 } from './calc.js';
 
 // アプリ全体で共有する状態・データの読み書き・描画の呼び出し口
@@ -14,6 +15,9 @@ export const state = {
   goal: null, // 資産全体の目標（将来タブの逆算）
   goals: [], // 目的別の貯金（車・引っ越しなど）
   allocations: null, categories: [], expenses: [], meta: {},
+  planHistory: [], // 収入・固定費などの設定の履歴
+  settlements: {}, // 期間の締め（期間の初日 → どうしたか）
+  goalLog: [], // 目的別の貯金に入れた記録
 };
 export const ui = {
   entryCategory: 'food',
@@ -33,7 +37,27 @@ export const catLabel = (id) => {
   const c = catMap()[id];
   return c ? `${c.icon} ${esc(c.name)}` : '❔ 不明';
 };
-export const plan = () => monthlyPlan(state);
+/** ボーナスの予定（「別管理」のときの使い道） */
+export const bonus = () => bonusSchedule(state.profile);
+/** 今の設定による毎月の計画（前の期間からの繰り越しを含まない） */
+export const basePlan = () => monthlyPlan(state);
+/** その期間に、前の期間から繰り越したお金（マイナスは前の期間の使いすぎ分） */
+export const carryIn = (period = currentPeriod()) => {
+  const s = state.settlements[budgetPeriod(period.start, payday(), -1).startKey];
+  return s?.action === 'carry' ? n(s.amount) : 0;
+};
+/** 今の期間の計画（繰り越しを含む）。「今月あといくら」などはこれを使う */
+export const plan = () => {
+  const p = basePlan();
+  const carry = carryIn();
+  return { ...p, carry, free: p.free + carry };
+};
+/** 過去の期間はその時点の設定で、今の期間は今の計画で計算する（グラフ用） */
+export function planFor(period) {
+  if (period.startKey === currentPeriod().startKey) return plan();
+  const snap = planAt(state.planHistory, period.startKey) ?? basePlan();
+  return { ...snap, goals: goalsPaidIn(state.goalLog, period) };
+}
 /** 将来の資産に数える貯金（目的別に取り分けた分は使う予定なので除く） */
 export const generalSavings = () => Math.max(0, n(state.profile.currentSavings) - earmarkedSavings(state.goals));
 export const payday = () => state.profile.payday || 1;
@@ -42,6 +66,48 @@ export const history = () => historyAverages(state.expenses, new Date(), 3, payd
 export const allow = () => allowance({ plan: plan(), expenses: state.expenses, groupOf, payday: payday() });
 export const freeAlloc = () => allocate(plan().free, state.allocations.percents);
 export const visitsPerWeek = () => Math.max(1, Math.round(n(state.allocations.eatoutPerWeek)) || 1);
+
+/**
+ * まだ締めていない前の期間の、余ったお金（または足りなかったお金）。
+ * 使い始める前の期間・記録がない期間・収入がない期間・ちょうど0円のときは null。
+ */
+export function pendingSettlement(today = new Date()) {
+  const prev = budgetPeriod(today, payday(), -1);
+  if (state.settlements[prev.startKey]) return null;
+  if ((state.meta.firstUsedAt ?? '').slice(0, 10) > prev.endKey) return null;
+  if (!state.expenses.some((e) => inPeriod(prev, e.date))) return null;
+  const planBase = planAt(state.planHistory, prev.startKey) ?? basePlan();
+  if (!(n(planBase.income) > 0)) return null;
+  const r = periodLeftover({
+    period: prev, planBase, expenses: state.expenses, groupOf,
+    goalsPaid: goalsPaidIn(state.goalLog, prev), carryIn: carryIn(prev),
+  });
+  return r.leftover === 0 ? null : { period: prev, ...r };
+}
+
+/** 目的別の貯金に入れた記録を追加する（source：monthly / bonus / leftover）。戻り値の id で取り消せる */
+export async function logGoal(entry) {
+  const item = { id: uid(), ...entry };
+  state.goalLog = [...state.goalLog, item];
+  await ds.saveGoalLog(state.goalLog);
+  return item.id;
+}
+export async function unlogGoal(ids) {
+  const set = new Set([].concat(ids));
+  state.goalLog = state.goalLog.filter((x) => !set.has(x.id));
+  await ds.saveGoalLog(state.goalLog);
+}
+
+/** 今の期間から有効な設定として履歴に残す（収入が未設定のあいだは残さない） */
+export async function recordPlanSnapshot() {
+  if (!state.profile) return;
+  const base = basePlan();
+  if (!(base.income > 0)) return;
+  const next = upsertPlanSnapshot(state.planHistory, currentPeriod().startKey, base);
+  if (JSON.stringify(next) === JSON.stringify(state.planHistory)) return;
+  state.planHistory = next;
+  await ds.savePlanHistory(next);
+}
 
 /** 今の期間・今週（月曜〜今日）のカテゴリ別支出 */
 export function categoryUsage(today = new Date()) {
@@ -64,8 +130,13 @@ export async function prepareData() {
 }
 
 export async function loadAll() {
-  [state.profile, state.fixedCosts, state.budgets, state.simulation, state.goal, state.goals, state.allocations, state.categories, state.expenses, state.meta] =
-    await Promise.all([ds.getProfile(), ds.listFixedCosts(), ds.listBudgets(), ds.getSimulation(), ds.getGoal(), ds.listGoals(), ds.getAllocations(), ds.listCategories(), ds.listExpenses(), ds.getMeta()]);
+  [
+    state.profile, state.fixedCosts, state.budgets, state.simulation, state.goal, state.goals, state.allocations,
+    state.categories, state.expenses, state.meta, state.planHistory, state.settlements, state.goalLog,
+  ] = await Promise.all([
+    ds.getProfile(), ds.listFixedCosts(), ds.listBudgets(), ds.getSimulation(), ds.getGoal(), ds.listGoals(), ds.getAllocations(),
+    ds.listCategories(), ds.listExpenses(), ds.getMeta(), ds.listPlanHistory(), ds.getSettlements(), ds.listGoalLog(),
+  ]);
   if (!state.meta.firstUsedAt) {
     state.meta.firstUsedAt = new Date().toISOString();
     await ds.saveMeta(state.meta);
@@ -108,6 +179,7 @@ export function flushSaves() {
   clearTimeout(saveTimer);
   pendingSaves.forEach((k) => persisters[k]());
   pendingSaves.clear();
+  recordPlanSnapshot();
 }
 window.addEventListener('pagehide', flushSaves);
 

@@ -28,7 +28,7 @@ export function monthlyPlan({ profile, fixedCosts, budgets, simulation, goals = 
   const living = sum(budgets, (b) => b.monthlyLimit);
   const savings = n(simulation.monthlySavings);
   const investment = n(simulation.monthlyInvestment);
-  const goalsMonthly = goalsMonthlyTotal(goals, today);
+  const goalsMonthly = goalsMonthlyTotal(goals, today, bonusSchedule(profile));
   return {
     income, fixed, living, savings, investment, goals: goalsMonthly,
     free: income - fixed - living - savings - investment - goalsMonthly,
@@ -151,9 +151,9 @@ export function judgeSpend(amount, a) {
   return { level: 'over', message: `今月の自由に使えるお金を${yen(amt - Math.max(0, a.monthLeft))}超えます。来月の予算か貯蓄予定から回す計画にしましょう。` };
 }
 
-/** 単純積立（利息なし）：現在の貯金 + 毎月の貯蓄 × 12 × 年数 */
-export function futureSavings(current, monthly, years) {
-  return n(current) + n(monthly) * 12 * years;
+/** 単純積立（利息なし）：現在の貯金 + 毎月の貯蓄 × 12 × 年数（＋ボーナスから貯金に回す年額 × 年数） */
+export function futureSavings(current, monthly, years, bonusPerYear = 0) {
+  return n(current) + n(monthly) * 12 * years + n(bonusPerYear) * years;
 }
 
 /**
@@ -398,7 +398,7 @@ const monthIndex = (y, month1) => y * 12 + (month1 - 1);
  * status: unset（目標金額なし）/ active / done（達成）/ due（もう積み立てる回数がない）/ overdue（購入予定月を過ぎた）
  * thisMonthAmount: 今月の予算から差し引く額（積立済みなら実際に積み立てた額）
  */
-export function goalPlan(goal, today = new Date()) {
+export function goalPlan(goal, today = new Date(), bonus = null) {
   const target = n(goal.targetAmount);
   const saved = n(goal.saved);
   const remaining = Math.max(0, target - saved);
@@ -406,16 +406,108 @@ export function goalPlan(goal, today = new Date()) {
   const diff = monthIndex(n(goal.targetYear), n(goal.targetMonth)) - monthIndex(today.getFullYear(), today.getMonth() + 1);
   const slots = diff - (contributed ? 1 : 0);
   const contributedAmount = contributed ? n(goal.lastContributionAmount) : 0;
-  const base = { target, saved, remaining, slots, contributed, progress: target > 0 ? Math.min(1, saved / target) : 0 };
+  // 購入予定月の前月までに受け取るボーナスから、この目的に入れる予定の額
+  const bonusPayouts = n(goal.bonusPerPayout) > 0 ? bonusPayoutsBefore(bonus, today, n(goal.targetYear), n(goal.targetMonth)) : 0;
+  const bonusCover = Math.min(remaining, n(goal.bonusPerPayout) * bonusPayouts);
+  const base = {
+    target, saved, remaining, slots, contributed, bonusPayouts, bonusCover,
+    progress: target > 0 ? Math.min(1, saved / target) : 0,
+  };
   if (target <= 0) return { ...base, status: 'unset', monthly: 0, thisMonthAmount: contributedAmount };
   if (remaining === 0) return { ...base, status: 'done', monthly: 0, thisMonthAmount: contributedAmount };
+  const fromMonthly = remaining - bonusCover;
+  if (fromMonthly <= 0) return { ...base, status: 'active', monthly: 0, thisMonthAmount: contributedAmount };
   if (slots <= 0) return { ...base, status: diff < 0 ? 'overdue' : 'due', monthly: 0, thisMonthAmount: contributedAmount };
-  const monthly = Math.ceil(remaining / slots / 100) * 100;
+  const monthly = Math.ceil(fromMonthly / slots / 100) * 100;
   return { ...base, status: 'active', monthly, thisMonthAmount: contributed ? contributedAmount : monthly };
 }
 
 /** 今月の予算から差し引く、目的別の積立の合計 */
-export const goalsMonthlyTotal = (goals, today = new Date()) => sum(goals, (g) => goalPlan(g, today).thisMonthAmount);
+export const goalsMonthlyTotal = (goals, today = new Date(), bonus = null) => sum(goals, (g) => goalPlan(g, today, bonus).thisMonthAmount);
+
+/* ---------- ボーナス（「別管理」のときの使い道） ---------- */
+
+/**
+ * ボーナスの予定。「別管理」で金額があるときだけ有効。
+ * perPayout：1回あたりの手取り（年間 ÷ 支給回数）、received：受け取りを記録した月（YYYY-MM）
+ */
+export function bonusSchedule(profile) {
+  const months = [...new Set((profile.bonusMonths ?? [6, 12]).map(n).filter((m) => m >= 1 && m <= 12))].sort((a, b) => a - b);
+  const active = profile.bonusMode !== 'monthly' && n(profile.bonus) > 0 && months.length > 0;
+  return {
+    active, months,
+    perPayout: months.length ? n(profile.bonus) / months.length : 0,
+    toSavings: n(profile.bonusPlan?.savings),
+    received: profile.bonusReceived ?? [],
+  };
+}
+
+/** 今月（受け取り済みなら来月）から、購入予定月の前月までに支給されるボーナスの回数 */
+export function bonusPayoutsBefore(bonus, today, targetYear, targetMonth) {
+  if (!bonus?.active) return 0;
+  const end = monthIndex(targetYear, targetMonth); // この月は含めない
+  let count = 0;
+  for (let i = monthIndex(today.getFullYear(), today.getMonth() + 1); i < end; i++) {
+    const y = Math.floor(i / 12);
+    const m = (i % 12) + 1;
+    if (!bonus.months.includes(m)) continue;
+    if (bonus.received.includes(`${y}-${String(m).padStart(2, '0')}`)) continue;
+    count += 1;
+  }
+  return count;
+}
+
+/** ボーナス1回分の使い道：貯金・目的別・残り（自由に使える） */
+export function bonusAllocation(bonus, goals) {
+  const toGoals = sum(goals, (g) => g.bonusPerPayout);
+  const rest = bonus.perPayout - bonus.toSavings - toGoals;
+  return { perPayout: bonus.perPayout, toSavings: bonus.toSavings, toGoals, rest };
+}
+
+/** 今月がボーナス月で、まだ受け取りを記録していないか */
+export const bonusDueThisMonth = (bonus, today = new Date()) =>
+  bonus.active && bonus.months.includes(today.getMonth() + 1) && !bonus.received.includes(toMonthKey(today));
+
+/* ---------- 収入・固定費などの履歴（設定を変えた期間から反映） ---------- */
+
+export const PLAN_HISTORY_KEYS = ['income', 'fixed', 'living', 'savings', 'investment'];
+
+/** dateKey の時点で有効だった設定。履歴より前の期間は、いちばん古い記録で代用する */
+export function planAt(history, dateKey) {
+  let found = null;
+  for (const h of history) if (h.from <= dateKey) found = h;
+  return found ?? history[0] ?? null;
+}
+
+/**
+ * 今の期間の初日（fromKey）から有効な設定として記録する。
+ * 直前に有効だった設定と同じなら記録しない。同じ期間の記録は上書きする。
+ */
+export function upsertPlanSnapshot(history, fromKey, plan) {
+  const values = Object.fromEntries(PLAN_HISTORY_KEYS.map((k) => [k, Math.round(n(plan[k]))]));
+  const others = history.filter((h) => h.from !== fromKey);
+  const prev = planAt(others.filter((h) => h.from < fromKey), fromKey);
+  const same = prev && PLAN_HISTORY_KEYS.every((k) => n(prev[k]) === values[k]);
+  return (same ? others : [...others, { from: fromKey, ...values }]).sort((a, b) => a.from.localeCompare(b.from));
+}
+
+/* ---------- 期間の締め：余ったお金・足りなかったお金 ---------- */
+
+/**
+ * 期間が終わったときの自由に使えるお金の残り。
+ * 予算 ＝ その期間の設定（収入 − 固定費 − 生活費 − 貯蓄 − 積立投資）− 目的別に実際に積み立てた額 ＋ 前の期間からの繰り越し
+ */
+export function periodLeftover({ period, planBase, expenses, groupOf, goalsPaid = 0, carryIn = 0 }) {
+  const p = planBase ?? { income: 0, fixed: 0, living: 0, savings: 0, investment: 0 };
+  const list = expenses.filter((e) => inPeriod(period, e.date));
+  const budget = n(p.income) - n(p.fixed) - n(p.living) - n(p.savings) - n(p.investment) - n(goalsPaid) + n(carryIn);
+  const used = freeUsed(list, groupOf, n(p.living));
+  return { budget, used, leftover: Math.round(budget - used), count: list.length };
+}
+
+/** 目的別の積立の記録のうち、期間内に毎月の積立として入れた合計（ボーナス・繰り越し分は除く） */
+export const goalsPaidIn = (goalLog, period) =>
+  sum(goalLog.filter((x) => x.source === 'monthly' && inPeriod(period, x.date)), (x) => x.amount);
 
 /** 現在の貯金額のうち、目的別に取り分けている合計 */
 export const earmarkedSavings = (goals) => sum(goals, (g) => g.saved);
@@ -464,7 +556,7 @@ export function backupReminder({ firstUsedAt, lastBackupAt, snoozedUntil } = {},
  * 収入・固定費は履歴を持たないため、今の設定額で計算する。
  * 今の期間（current）は途中なので、貯蓄は「このペースで使った場合の見込み」を返す。
  */
-export function periodHistory({ expenses, plan, groupOf, payday = 1, today = new Date(), count = 6 }) {
+export function periodHistory({ expenses, plan, planFor = () => plan, groupOf, payday = 1, today = new Date(), count = 6 }) {
   if (!expenses.length) return [];
   const firstKey = expenses.reduce((m, e) => (e.date < m ? e.date : m), expenses[0].date);
   const todayKey = toDateKey(today);
@@ -480,11 +572,12 @@ export function periodHistory({ expenses, plan, groupOf, payday = 1, today = new
       const soFar = sum(list.filter((e) => e.date <= todayKey), (e) => e.amount);
       spendForSaving = (soFar / (diffDays(period.start, today) + 1)) * period.days;
     }
+    const p = planFor(period);
     rows.push({
       period, current,
-      income: plan.income, fixed: plan.fixed, living: s.living, free: s.free, spent: s.total,
-      saved: plan.income - plan.fixed - spendForSaving,
-      planned: plan.savings + n(plan.investment),
+      income: n(p.income), fixed: n(p.fixed), living: s.living, free: s.free, spent: s.total,
+      saved: n(p.income) - n(p.fixed) - spendForSaving,
+      planned: n(p.savings) + n(p.investment) + n(p.goals),
     });
   }
   return rows;
@@ -528,6 +621,49 @@ export function parseMoney(s) {
 export function formatMoneyText(s) {
   const digits = toHalfWidth(s).replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, 12);
   return digits ? Number(digits).toLocaleString('ja-JP') : '';
+}
+
+/* ---------- カレンダーのリマインダー（.ics） ---------- */
+
+/** カレンダー形式の文字列：\ ; , を \ でエスケープし、改行は \n と書く */
+const icsText = (t) => String(t).replace(/[\\;,]/g, (c) => `\\${c}`).replace(/\n/g, '\\n');
+const icsDate = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+
+/**
+ * 給料日（毎月）とボーナス月（毎年）の朝9時に通知する予定を、カレンダーアプリに登録できる形式で作る。
+ * サーバーを使わずに確実に通知するため、端末のカレンダーの通知機能を使う。
+ */
+export function reminderCalendar({ payday = 1, bonusMonths = [], today = new Date(), appUrl = '' }) {
+  const day = Math.min(MAX_PAYDAY, Math.max(1, Math.round(n(payday)) || 1));
+  const first = new Date(today.getFullYear(), today.getMonth() + (today.getDate() > day ? 1 : 0), day);
+  const stamp = today.toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const event = (uid, start, rrule, summary, description) => [
+    'BEGIN:VEVENT',
+    `UID:${uid}@my-money`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART:${icsDate(start)}T090000`,
+    `DTEND:${icsDate(start)}T091500`,
+    `RRULE:${rrule}`,
+    `SUMMARY:${icsText(summary)}`,
+    `DESCRIPTION:${icsText(description)}`,
+    ...(appUrl ? [`URL:${appUrl}`] : []),
+    'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(summary)}`, 'TRIGGER:PT0M', 'END:VALARM',
+    'END:VEVENT',
+  ];
+  const lines = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//my-money//reminder//JA', 'CALSCALE:GREGORIAN',
+    ...event('payday', first, `FREQ=MONTHLY;BYMONTHDAY=${day}`, 'my-money：給料日のチェック',
+      '先月の余ったお金の行き先・目的別の積立・バックアップをアプリで確認しましょう。'),
+  ];
+  const months = [...new Set(bonusMonths.map(n))].filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b);
+  if (months.length) {
+    const next = months.map((m) => new Date(today.getFullYear() + (m < today.getMonth() + 1 || (m === today.getMonth() + 1 && today.getDate() > day) ? 1 : 0), m - 1, day))
+      .sort((a, b) => a - b)[0];
+    lines.push(...event('bonus', next, `FREQ=YEARLY;BYMONTH=${months.join(',')};BYMONTHDAY=${day}`, 'my-money：ボーナス月',
+      'ボーナスを受け取ったら、アプリで「受け取った」を押して使い道を記録しましょう。'));
+  }
+  lines.push('END:VCALENDAR');
+  return lines.join('\r\n') + '\r\n';
 }
 
 export function yen(v) {

@@ -1,14 +1,14 @@
 import {
-  toDateKey,
+  toDateKey, reminderCalendar,
 } from '../calc.js';
-import { persistent, ds, state, ui, esc, catMap, loadAll, render } from '../core.js';
+import { persistent, ds, state, ui, esc, catMap, loadAll, render, payday, bonus } from '../core.js';
 import { showToast } from '../ui.js';
 
 /* ---------- 設定 ---------- */
 
 /* ---------- PWA（ホーム画面に追加・オフライン） ---------- */
 
-export const APP_VERSION = '1.3.0';
+export const APP_VERSION = '1.4.0';
 export let installPrompt = null;
 export const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 export const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -98,6 +98,13 @@ export function settingsView() {
   return `
     ${installCard()}
 
+    <section class="card" id="reminder-card">
+      <h2>📅 給料日のお知らせ</h2>
+      <p class="note lead">給料日（毎月${payday()}日）${bonus().active ? `とボーナス月（${bonus().months.map((m) => `${m}月`).join('・')}）` : ''}の朝9時に、スマホのカレンダーから通知が届くように登録できます。先月の余ったお金・目的別の積立・バックアップの確認に使ってください。</p>
+      <button class="btn block" data-action="add-calendar">カレンダーに登録する</button>
+      <p class="note">アプリを閉じていても届くよう、スマホのカレンダーの通知を使います（家計のデータを外部のサーバーに送らないため、アプリからの通知はしていません）。給料日やボーナス月を変えたら、もう一度登録し直してください。</p>
+    </section>
+
     <section class="card">
       <h2>カテゴリを追加</h2>
       <div class="cat-form">
@@ -130,7 +137,27 @@ export function settingsView() {
 
 /* ---------- ボタン操作（data-action） ---------- */
 
+/** 給料日・ボーナス月のリマインダーをカレンダー形式（.ics）で渡す */
+function addCalendar() {
+  const b = bonus();
+  const ics = reminderCalendar({
+    payday: payday(), bonusMonths: b.active ? b.months : [], appUrl: location.origin + location.pathname,
+  });
+  const url = URL.createObjectURL(new Blob([ics], { type: 'text/calendar;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  // iPhone の Safari は開くとカレンダーへの追加画面になる。ほかはファイルとして保存し、開いて追加する
+  if (isIOS()) a.target = '_blank';
+  else a.download = 'my-money-reminder.ics';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 export const settingsActions = {
+  'add-calendar': async (btn, ev) => {
+    addCalendar();
+    showToast(isIOS() ? '開いた画面で「すべて追加」を押してください' : 'ダウンロードしたファイルを開いて、カレンダーに追加してください');
+  },
   'install': async (btn, ev) => {
     if (!installPrompt) return;
     installPrompt.prompt();

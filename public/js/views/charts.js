@@ -1,7 +1,7 @@
 import {
   n, sum, inPeriod, periodLabel, periodHistory, niceScale, compactYen, yen,
 } from '../calc.js';
-import { state, $main, esc, catMap, groupOf, catLabel, plan, payday } from '../core.js';
+import { state, $main, esc, catMap, groupOf, catLabel, planFor, payday } from '../core.js';
 
 /* ---------- グラフ ---------- */
 
@@ -18,12 +18,12 @@ export function chartsView(period) {
   if (!state.expenses.length) {
     return `<section class="card"><h2>グラフ</h2><p class="muted">家計簿に支出を記録すると、月ごとの収支やカテゴリ別の支出がグラフで表示されます。</p></section>`;
   }
-  const rows = periodHistory({ expenses: state.expenses, plan: plan(), groupOf, payday: payday() });
+  const rows = periodHistory({ expenses: state.expenses, planFor, groupOf, payday: payday() });
   return `
     ${categoryChart(period)}
     ${flowChart(rows)}
     ${savingChart(rows)}
-    <p class="note center">収入と固定費は、今の設定額で過去の月も計算しています。</p>`;
+    <p class="note center">収入や固定費は、設定を変えた月から反映しています（それより前の月は、記録が残っている最初の設定で計算）。</p>`;
 }
 
 export function tableView(head, body) {

@@ -7,6 +7,8 @@ import {
   budgetPeriod, periodLabel, frequentEntries, backupReminder,
   periodHistory, niceScale, compactYen, parseMoney, formatMoneyText,
   goalPlan, goalsMonthlyTotal, earmarkedSavings,
+  bonusSchedule, bonusPayoutsBefore, bonusAllocation, bonusDueThisMonth, planAt, upsertPlanSnapshot,
+  periodLeftover, goalsPaidIn, reminderCalendar, budgetPeriod as period,
 } from '../public/js/calc.js';
 
 const groupOf = (id) => (['food', 'daily'].includes(id) ? 'living' : 'free');
@@ -399,4 +401,107 @@ test('目的別の積立は自由に使えるお金から差し引き、貯蓄�
   assert.equal(plan.free, 50000);
   assert.equal(Math.round(householdHealth(plan).savingsRate), 48); // (4万+15万) / 40万
   assert.equal(suggestBudget(300000, { goals: 30000 }).savings, 40000); // 貯蓄の目安からも差し引く
+});
+
+/* ---------- ボーナス・履歴・期間の締め・リマインダー ---------- */
+
+const bonusProfile = (o = {}) => ({ bonus: 600000, bonusMode: 'separate', bonusMonths: [6, 12], bonusPlan: { savings: 100000 }, bonusReceived: [], ...o });
+
+test('ボーナスの予定：別管理で金額があるときだけ有効、1回あたり＝年間÷回数', () => {
+  const b = bonusSchedule(bonusProfile());
+  assert.deepEqual([b.active, b.months, b.perPayout, b.toSavings], [true, [6, 12], 300000, 100000]);
+  assert.equal(bonusSchedule(bonusProfile({ bonusMode: 'monthly' })).active, false);
+  assert.equal(bonusSchedule(bonusProfile({ bonus: 0 })).active, false);
+  assert.deepEqual(bonusSchedule({ bonus: 1, bonusMode: 'separate' }).months, [6, 12]); // 支給月の初期値
+});
+
+test('ボーナスの回数：今月から購入予定月の前月まで、受け取り済みの月は除く', () => {
+  const b = bonusSchedule(bonusProfile());
+  assert.equal(bonusPayoutsBefore(b, today1014, 2027, 4), 1); // 12月
+  assert.equal(bonusPayoutsBefore(b, today1014, 2027, 12), 2); // 12月・6月（購入月の12月は含めない）
+  assert.equal(bonusPayoutsBefore(b, new Date(2026, 11, 5), 2027, 4), 1); // 今月12月・未受取
+  assert.equal(bonusPayoutsBefore({ ...b, received: ['2026-12'] }, new Date(2026, 11, 5), 2027, 4), 0);
+  assert.equal(bonusPayoutsBefore({ ...b, active: false }, today1014, 2027, 12), 0);
+});
+
+test('目的別の逆算：ボーナスから入れる分を差し引いて毎月の額を出す', () => {
+  const b = bonusSchedule(bonusProfile());
+  // 残り60万円・6回。12月のボーナスから20万円 → 残り40万円を6回 → 月66,700円
+  const gp = goalPlan(car({ bonusPerPayout: 200000 }), today1014, b);
+  assert.deepEqual([gp.bonusPayouts, gp.bonusCover, gp.monthly], [1, 200000, 66700]);
+  // ボーナスだけで足りるなら毎月の積立は不要
+  const covered = goalPlan(car({ bonusPerPayout: 600000 }), today1014, b);
+  assert.deepEqual([covered.status, covered.monthly, covered.bonusCover], ['active', 0, 600000]);
+  // ボーナスを使わない設定なら今までどおり
+  assert.equal(goalPlan(car(), today1014, b).monthly, 100000);
+  // 毎月の予算から引く額もボーナス分だけ減る
+  const plan = monthlyPlan({ profile: { takeHome: 300000, ...bonusProfile() }, fixedCosts: [], budgets: [], simulation: {}, goals: [car({ bonusPerPayout: 200000 })] }, today1014);
+  assert.equal(plan.goals, 66700);
+});
+
+test('ボーナス1回分の使い道と、受け取り待ちの判定', () => {
+  const b = bonusSchedule(bonusProfile());
+  assert.deepEqual(bonusAllocation(b, [{ bonusPerPayout: 150000 }, {}]), { perPayout: 300000, toSavings: 100000, toGoals: 150000, rest: 50000 });
+  assert.equal(bonusDueThisMonth(b, new Date(2026, 11, 10)), true);
+  assert.equal(bonusDueThisMonth({ ...b, received: ['2026-12'] }, new Date(2026, 11, 10)), false);
+  assert.equal(bonusDueThisMonth(b, today1014), false);
+});
+
+test('将来の貯金：ボーナスから貯金に回す年額も加える', () => {
+  assert.equal(futureSavings(500000, 50000, 2, 200000), 500000 + 50000 * 24 + 400000);
+});
+
+test('設定の履歴：変えた期間から反映し、同じ値なら記録しない', () => {
+  const v = (income, fixed = 100000) => ({ income, fixed, living: 0, savings: 0, investment: 0 });
+  let h = upsertPlanSnapshot([], '2026-08-01', v(300000));
+  h = upsertPlanSnapshot(h, '2026-09-01', v(300000)); // 変化なし
+  assert.equal(h.length, 1);
+  h = upsertPlanSnapshot(h, '2026-10-01', v(320000));
+  h = upsertPlanSnapshot(h, '2026-10-01', v(330000)); // 同じ期間は上書き
+  assert.deepEqual(h.map((x) => [x.from, x.income]), [['2026-08-01', 300000], ['2026-10-01', 330000]]);
+  assert.equal(planAt(h, '2026-09-15').income, 300000);
+  assert.equal(planAt(h, '2026-10-01').income, 330000);
+  assert.equal(planAt(h, '2026-01-01').income, 300000); // 記録より前は最も古い記録で代用
+  assert.equal(planAt([], '2026-01-01'), null);
+});
+
+test('期間ごとの収支は、その期間の設定で計算する', () => {
+  const rows = periodHistory({
+    expenses: [{ date: '2026-09-10', category: 'food', amount: 10000 }, { date: '2026-10-01', category: 'food', amount: 1 }],
+    planFor: (p) => (p.startKey < '2026-10-01' ? { income: 250000, fixed: 90000, savings: 50000 } : { income: 300000, fixed: 100000, savings: 50000, goals: 20000 }),
+    groupOf, today: today1014,
+  });
+  assert.deepEqual(rows.map((r) => [r.income, r.fixed, r.planned]), [[250000, 90000, 50000], [300000, 100000, 70000]]);
+  assert.equal(rows[0].saved, 150000);
+});
+
+test('期間の締め：余ったお金＝その期間の予算 − 実際の積立 ＋ 繰り越し − 使った額', () => {
+  const sep = period(new Date(2026, 8, 10), 1); // 2026年9月
+  const planBase = { income: 300000, fixed: 100000, living: 50000, savings: 50000, investment: 0 };
+  const expenses = [
+    { date: '2026-09-05', category: 'eatout', amount: 30000 },
+    { date: '2026-09-06', category: 'food', amount: 60000 }, // 生活費を1万円超過 → 自由費から
+    { date: '2026-10-01', category: 'eatout', amount: 99999 }, // 別の期間
+  ];
+  const r = periodLeftover({ period: sep, planBase, expenses, groupOf, goalsPaid: 20000, carryIn: 5000 });
+  assert.deepEqual(r, { budget: 85000, used: 40000, leftover: 45000, count: 2 });
+  assert.equal(periodLeftover({ period: sep, planBase: null, expenses: [], groupOf }).leftover, 0);
+  const log = [
+    { date: '2026-09-25', amount: 20000, source: 'monthly' },
+    { date: '2026-09-30', amount: 50000, source: 'bonus' },
+    { date: '2026-10-02', amount: 7000, source: 'monthly' },
+  ];
+  assert.equal(goalsPaidIn(log, sep), 20000);
+});
+
+test('カレンダーのリマインダー：給料日の毎月・ボーナス月の毎年、朝9時に通知', () => {
+  const ics = reminderCalendar({ payday: 25, bonusMonths: [12, 6], today: today1014 });
+  assert.match(ics, /^BEGIN:VCALENDAR\r\n/);
+  assert.match(ics, /DTSTART:20261025T090000\r\nDTEND:20261025T091500\r\nRRULE:FREQ=MONTHLY;BYMONTHDAY=25\r\n/);
+  assert.match(ics, /DTSTART:20261225T090000[\s\S]*RRULE:FREQ=YEARLY;BYMONTH=6,12;BYMONTHDAY=25/);
+  assert.equal((ics.match(/BEGIN:VALARM/g) || []).length, 2);
+  assert.match(ics, /END:VCALENDAR\r\n$/);
+  // 給料日を過ぎていれば翌月から
+  assert.match(reminderCalendar({ payday: 10, today: today1014 }), /DTSTART:20261110T090000/);
+  assert.doesNotMatch(reminderCalendar({ payday: 10, today: today1014 }), /BYMONTH=/);
 });
