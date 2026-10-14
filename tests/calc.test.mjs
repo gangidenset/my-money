@@ -6,6 +6,7 @@ import {
   requiredMonthly, monthsToReach, formatMonths, incomeGrowth, householdHealth, fixedCostTips, savingEffect,
   budgetPeriod, periodLabel, frequentEntries, backupReminder,
   periodHistory, niceScale, compactYen, parseMoney, formatMoneyText,
+  goalPlan, goalsMonthlyTotal, earmarkedSavings,
 } from '../public/js/calc.js';
 
 const groupOf = (id) => (['food', 'daily'].includes(id) ? 'living' : 'free');
@@ -23,7 +24,7 @@ test('自由に使えるお金 = 収入 − 固定費 − 生活費予算 − �
     budgets: [{ monthlyLimit: 50000 }, { monthlyLimit: 30000 }],
     simulation: { monthlySavings: 50000, monthlyInvestment: 20000 },
   });
-  assert.deepEqual(plan, { income: 300000, fixed: 120000, living: 80000, savings: 50000, investment: 20000, free: 30000 });
+  assert.deepEqual(plan, { income: 300000, fixed: 120000, living: 80000, savings: 50000, investment: 20000, goals: 0, free: 30000 });
 });
 
 test('生活費予算の超過分は自由費から差し引く', () => {
@@ -354,4 +355,48 @@ test('金額入力：カンマ・全角数字・円を受け付ける', () => {
   assert.equal(formatMoneyText('０１２３４'), '1,234');
   assert.equal(formatMoneyText('0'), '0');
   assert.equal(formatMoneyText('abc'), '');
+});
+
+/* ---------- 目的別の貯金 ---------- */
+
+const today1014 = new Date(2026, 9, 14);
+const car = (o = {}) => ({ name: '車', targetAmount: 1000000, targetYear: 2027, targetMonth: 4, saved: 400000, lastContributionMonth: null, lastContributionAmount: 0, ...o });
+
+test('目的別の貯金：購入予定月の前月までの回数で逆算（運用益なし・100円単位で切り上げ）', () => {
+  // 2026年10月 → 2027年4月購入：10〜3月の6回で残り60万円 → 月10万円
+  const gp = goalPlan(car(), today1014);
+  assert.deepEqual([gp.status, gp.slots, gp.remaining, gp.monthly, gp.thisMonthAmount], ['active', 6, 600000, 100000, 100000]);
+  assert.equal(gp.progress, 0.4);
+  // 割り切れない場合は切り上げ：残り10万円・3回 → 33,400円
+  assert.equal(goalPlan(car({ targetAmount: 500000, targetYear: 2027, targetMonth: 1 }), today1014).monthly, 33400);
+});
+
+test('目的別の貯金：今月分を積み立て済みなら、今月は実際の額を差し引き、来月から数え直す', () => {
+  const gp = goalPlan(car({ saved: 500000, lastContributionMonth: '2026-10', lastContributionAmount: 100000 }), today1014);
+  assert.deepEqual([gp.status, gp.slots, gp.monthly, gp.thisMonthAmount], ['active', 5, 100000, 100000]);
+  // 先月の積立は今月に影響しない
+  assert.equal(goalPlan(car({ lastContributionMonth: '2026-09', lastContributionAmount: 99999 }), today1014).thisMonthAmount, 100000);
+});
+
+test('目的別の貯金：達成・期限切れ・未設定', () => {
+  assert.equal(goalPlan(car({ saved: 1000000 }), today1014).status, 'done');
+  assert.equal(goalPlan(car({ saved: 1000000 }), today1014).thisMonthAmount, 0);
+  const due = goalPlan(car({ targetYear: 2026, targetMonth: 10 }), today1014); // 今月が購入予定月
+  assert.deepEqual([due.status, due.monthly, due.remaining], ['due', 0, 600000]);
+  assert.equal(goalPlan(car({ targetYear: 2026, targetMonth: 8 }), today1014).status, 'overdue');
+  assert.equal(goalPlan(car({ targetAmount: 0 }), today1014).status, 'unset');
+});
+
+test('目的別の積立は自由に使えるお金から差し引き、貯蓄率にも含める', () => {
+  const goals = [car(), car({ name: '家具', targetAmount: 200000, saved: 0, targetYear: 2027, targetMonth: 2 })]; // 月10万＋月5万
+  assert.equal(goalsMonthlyTotal(goals, today1014), 150000);
+  assert.equal(earmarkedSavings(goals), 400000);
+  const plan = monthlyPlan({
+    profile: { takeHome: 400000 }, fixedCosts: [{ amount: 100000 }], budgets: [{ monthlyLimit: 60000 }],
+    simulation: { monthlySavings: 40000 }, goals,
+  }, today1014);
+  assert.equal(plan.goals, 150000);
+  assert.equal(plan.free, 50000);
+  assert.equal(Math.round(householdHealth(plan).savingsRate), 48); // (4万+15万) / 40万
+  assert.equal(suggestBudget(300000, { goals: 30000 }).savings, 40000); // 貯蓄の目安からも差し引く
 });

@@ -541,3 +541,23 @@ select {
 
 /* 金額欄（カンマ区切り） */
 input[data-money] { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---- 目的別の貯金 ---- */
+.goal { padding: 12px 0; border-top: 1px solid var(--border); }
+.goal-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.goal-name { font-weight: 700; }
+.goal-target { font-size: 0.82rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.goal-bar { height: 10px; margin-top: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.goal-bar span { display: block; height: 100%; border-radius: 999px; background: var(--primary); }
+.goal-sub { margin: 4px 0 0; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.goal-monthly { margin: 8px 0 0; font-size: 0.9rem; }
+.goal-monthly strong { font-size: 1.25rem; }
+.goal-msg { margin: 8px 0 0; font-size: 0.86rem; }
+.goal-msg.ok { color: var(--ok); }
+.goal-msg.caution { color: var(--caution); }
+.goal .btn.block { margin-top: 8px; }
+.goal details { margin-top: 8px; }
+.ym { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.goals-total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); font-size: 0.9rem; }
+.goals-total strong { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+#goals-card .chips { margin-top: 12px; }

@@ -112,6 +112,10 @@ export function createDataService(storage) {
     },
     saveGoal: (goal) => storage.set('goal', goal),
 
+    /** 目的別の貯金（車・引っ越しなど）。saved は現在の貯金額のうち、この目的に取り分けている額 */
+    listGoals: () => read('goals', []),
+    saveGoals: (goals) => storage.set('goals', goals),
+
     async getAllocations() {
       return { percents: {}, eatoutPerWeek: 2, ...(await read('allocations', {})) };
     },
@@ -165,7 +169,7 @@ export function createDataService(storage) {
     saveMeta: (meta) => storage.set('meta', meta),
 
     async exportAll() {
-      const keys = ['profile', 'fixedCosts', 'budgets', 'simulation', 'goal', 'allocations', 'customCategories', 'expenses'];
+      const keys = ['profile', 'fixedCosts', 'budgets', 'simulation', 'goal', 'goals', 'allocations', 'customCategories', 'expenses'];
       const data = {};
       for (const k of keys) data[k] = await storage.get(k);
       return { app: 'my-money', version: 1, exportedAt: new Date().toISOString(), data };

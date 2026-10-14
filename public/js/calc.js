@@ -21,14 +21,18 @@ export function monthlyIncome(profile) {
   return profile.bonusMode === 'monthly' ? base + n(profile.bonus) / 12 : base;
 }
 
-/** 収入 − 固定費 − 生活費予算 − 貯蓄予定 − 積立投資 ＝ 自由に使えるお金 */
-export function monthlyPlan({ profile, fixedCosts, budgets, simulation }) {
+/** 収入 − 固定費 − 生活費予算 − 貯蓄予定 − 積立投資 − 目的別の積立 ＝ 自由に使えるお金 */
+export function monthlyPlan({ profile, fixedCosts, budgets, simulation, goals = [] }, today = new Date()) {
   const income = monthlyIncome(profile);
   const fixed = sum(fixedCosts, (c) => c.amount);
   const living = sum(budgets, (b) => b.monthlyLimit);
   const savings = n(simulation.monthlySavings);
   const investment = n(simulation.monthlyInvestment);
-  return { income, fixed, living, savings, investment, free: income - fixed - living - savings - investment };
+  const goalsMonthly = goalsMonthlyTotal(goals, today);
+  return {
+    income, fixed, living, savings, investment, goals: goalsMonthly,
+    free: income - fixed - living - savings - investment - goalsMonthly,
+  };
 }
 
 export function summarizeSpending(expenses, groupOf) {
@@ -244,7 +248,7 @@ export function historyAverages(expenses, today = new Date(), months = 3, payday
 export const SUGGEST_RATIOS = { fixed: 0.4, food: 0.133, daily: 0.033, transport: 0.033, savings: 0.233 };
 export const SUGGEST_PERCENTS = { eatout: 30, hobby: 20, fun: 20 };
 
-export function suggestBudget(income, { investment = 0, history = null } = {}) {
+export function suggestBudget(income, { investment = 0, goals = 0, history = null } = {}) {
   const r = (x) => Math.round(x / 1000) * 1000;
   const pick = (id) => {
     const avg = history?.byCategory?.[id];
@@ -253,7 +257,7 @@ export function suggestBudget(income, { investment = 0, history = null } = {}) {
   return {
     fixed: r(income * SUGGEST_RATIOS.fixed),
     living: { food: pick('food'), daily: pick('daily'), transport: pick('transport') },
-    savings: Math.max(0, r(income * SUGGEST_RATIOS.savings - n(investment))),
+    savings: Math.max(0, r(income * SUGGEST_RATIOS.savings - n(investment) - n(goals))),
     percents: { ...SUGGEST_PERCENTS },
   };
 }
@@ -320,7 +324,8 @@ export function incomeGrowth({ base, growthPct = 0, jobIncrease = 0, saveShare =
 export function householdHealth(plan) {
   const income = n(plan.income);
   if (income <= 0) return null;
-  const savingsRate = ((plan.savings + n(plan.investment)) / income) * 100;
+  // 目的別の積立（車・引っ越しなど）も「先に取り分けるお金」として貯蓄率に含める
+  const savingsRate = ((plan.savings + n(plan.investment) + n(plan.goals)) / income) * 100;
   const fixedRate = (plan.fixed / income) * 100;
   const freeRate = (plan.free / income) * 100;
   const reasons = [];
@@ -381,6 +386,39 @@ export function savingEffect(items, ratePct = 0) {
     tenYearsInvested: futureInvestment(0, monthly, ratePct, 10).value,
   };
 }
+
+/* ---------- 目的別の貯金（車・引っ越し・家具など。運用益なしで逆算） ---------- */
+
+const monthIndex = (y, month1) => y * 12 + (month1 - 1);
+
+/**
+ * 目的別の貯金の逆算。購入予定月の「前月」までに貯め切る前提で、
+ * 残りの積立回数で残額を割った金額（100円単位で切り上げ）を毎月の積立額とする。
+ * 今月すでに積み立てていれば、今月の枠は使用済みとして来月から数える。
+ * status: unset（目標金額なし）/ active / done（達成）/ due（もう積み立てる回数がない）/ overdue（購入予定月を過ぎた）
+ * thisMonthAmount: 今月の予算から差し引く額（積立済みなら実際に積み立てた額）
+ */
+export function goalPlan(goal, today = new Date()) {
+  const target = n(goal.targetAmount);
+  const saved = n(goal.saved);
+  const remaining = Math.max(0, target - saved);
+  const contributed = goal.lastContributionMonth === toMonthKey(today);
+  const diff = monthIndex(n(goal.targetYear), n(goal.targetMonth)) - monthIndex(today.getFullYear(), today.getMonth() + 1);
+  const slots = diff - (contributed ? 1 : 0);
+  const contributedAmount = contributed ? n(goal.lastContributionAmount) : 0;
+  const base = { target, saved, remaining, slots, contributed, progress: target > 0 ? Math.min(1, saved / target) : 0 };
+  if (target <= 0) return { ...base, status: 'unset', monthly: 0, thisMonthAmount: contributedAmount };
+  if (remaining === 0) return { ...base, status: 'done', monthly: 0, thisMonthAmount: contributedAmount };
+  if (slots <= 0) return { ...base, status: diff < 0 ? 'overdue' : 'due', monthly: 0, thisMonthAmount: contributedAmount };
+  const monthly = Math.ceil(remaining / slots / 100) * 100;
+  return { ...base, status: 'active', monthly, thisMonthAmount: contributed ? contributedAmount : monthly };
+}
+
+/** 今月の予算から差し引く、目的別の積立の合計 */
+export const goalsMonthlyTotal = (goals, today = new Date()) => sum(goals, (g) => goalPlan(g, today).thisMonthAmount);
+
+/** 現在の貯金額のうち、目的別に取り分けている合計 */
+export const earmarkedSavings = (goals) => sum(goals, (g) => g.saved);
 
 /* ---------- 入力の手間を減らす・データを守る ---------- */
 
