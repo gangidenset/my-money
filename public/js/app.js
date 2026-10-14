@@ -645,7 +645,7 @@ function budgetView() {
   const histHint = (id) => (hist?.byCategory[id] != null ? `過去${hist.months}か月平均 ${yen(hist.byCategory[id])}` : '');
   return `
     ${summaryCard()}
-    ${suggestCard()}
+    <div id="suggest-slot">${suggestCard()}</div>
 
     <section class="card">
       <h2>収入</h2>
@@ -1222,6 +1222,14 @@ function refreshLive() {
   const p = plan();
   const summary = document.getElementById('live-summary');
   if (summary) summary.outerHTML = summaryCard();
+  // 手取りを入れた直後にも目安カードを出す（開閉状態は保つ）
+  const suggest = document.getElementById('suggest-slot');
+  if (suggest) {
+    const wasOpen = suggest.querySelector('details')?.open;
+    suggest.innerHTML = suggestCard();
+    const details = suggest.querySelector('details');
+    if (details && wasOpen != null) details.open = wasOpen;
+  }
   document.querySelectorAll('[data-live="fixed"]').forEach((el) => (el.textContent = yen(p.fixed)));
   document.querySelectorAll('[data-live="living"]').forEach((el) => (el.textContent = yen(p.living)));
   document.querySelectorAll('[data-live="annual"]').forEach((el) => (el.textContent = yen(n(state.simulation.monthlySavings) * 12)));

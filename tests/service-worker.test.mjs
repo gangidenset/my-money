@@ -100,3 +100,14 @@ test('キャッシュ対象のファイルがすべて存在する', async () =>
   assert.ok(manifest.icons.some((i) => i.purpose === 'maskable'));
   assert.equal(manifest.display, 'standalone');
 });
+
+test('public/ のファイルはすべてオフライン用の一覧に入っている', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const root = new URL('../public/', import.meta.url);
+  const walk = async (dir, prefix = '') => (await Promise.all((await readdir(new URL(dir, root), { withFileTypes: true }))
+    .map((e) => (e.isDirectory() ? walk(`${dir}${e.name}/`, `${prefix}${e.name}/`) : [`${prefix}${e.name}`])))).flat();
+  const files = (await walk('')).filter((f) => f !== 'service-worker.js');
+  const shell = new Set(source.match(/const SHELL = \[([\s\S]*?)\];/)[1].match(/'\.\/[^']*'/g).map((s) => s.slice(3, -1)));
+  const missing = files.filter((f) => !shell.has(f));
+  assert.deepEqual(missing, [], `SHELL に追加が必要: ${missing.join(', ')}`);
+});
