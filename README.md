@@ -13,25 +13,39 @@ http://localhost:8080 を開く。ビルド不要（HTML / CSS / JavaScript の 
 ## テスト
 
 ```bash
-npm test
+npm run test:all
 ```
+
+`npm run lint`（読み込み忘れの検出）・`npm test`（計算・オフライン）・`npm run test:e2e`（画面操作。Windows では Edge を使用）を順に実行する。GitHub では、すべて通ったときだけ公開される。
 
 ## 構成
 
 ```
 public/
-  index.html        画面の骨組み・下部ナビ
-  css/app.css       スタイル（320px〜、ダークモード対応）
-  js/app.js         UI（画面描画・入力処理）
-  js/dataService.js Service 層（データ構造・CRUD）
-  js/storage.js     Storage 層（現在は localStorage。クラウドDBへ差し替え可能）
-  js/calc.js        計算ロジック（純粋関数）
-  manifest.json     PWA の設定（名前・アイコン・ショートカット）
-  service-worker.js オフライン対応（ネットワーク優先、つながらないときはキャッシュ）
-  icons/            アプリアイコン（scripts/make_icons.py で生成）
-tests/              計算ロジック・サービスワーカーのテスト
-server.mjs          開発用サーバー
+  index.html          画面の骨組み・下部ナビ
+  css/app.css         スタイル（320px〜、ダークモード対応）
+  js/app.js           画面の切り替え・入力とボタン操作の振り分け
+  js/core.js          共有する状態・データの読み込みと保存・描画の呼び出し口
+  js/ui.js            共通部品（トースト・金額欄・バー）
+  js/views/home.js    ホーム
+  js/views/ledger.js  家計簿（記録・編集・よく使う支出）
+  js/views/charts.js  家計簿のグラフ・ツールチップ
+  js/views/budget.js  予算（収入・固定費・生活費・使い道・目的別の貯金）
+  js/views/sim.js     将来（診断・資産・目標逆算・昇給・節約）
+  js/views/settings.js 設定（カテゴリ・バックアップ・PWA）
+  js/dataService.js   Service 層（データ構造・CRUD・データの版管理）
+  js/storage.js       Storage 層（現在は localStorage。クラウドDBへ差し替え可能）
+  js/calc.js          計算ロジック（純粋関数）
+  manifest.json       PWA の設定（名前・アイコン・ショートカット）
+  service-worker.js   オフライン対応（ネットワーク優先、つながらないときはキャッシュ）
+  icons/              アプリアイコン（scripts/make_icons.py で生成）
+tests/                計算ロジック・サービスワーカーのテスト（node --test）
+e2e/                  画面操作のテスト（Playwright。スマホ幅・日付固定）
+server.mjs            開発用サーバー
 ```
+
+各画面のボタン操作は、画面ごとのファイルの `○○Actions`（data-action 名 → 処理）にまとめている。
+依存の向きは core ← ui ← views ← app の一方向のみ。
 
 UI → dataService → storage の順にだけ依存する。データは端末内にのみ保存し、外部送信はしない。
 

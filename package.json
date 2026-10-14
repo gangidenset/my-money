@@ -8,9 +8,12 @@
     "start": "node server.mjs",
     "test": "node --test \"tests/*.test.mjs\"",
     "test:e2e": "playwright test",
-    "test:all": "npm test && npm run test:e2e"
+    "test:all": "npm run lint && npm test && npm run test:e2e",
+    "lint": "eslint public e2e tests server.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "1.64.0"
+    "@playwright/test": "1.64.0",
+    "eslint": "9.39.1",
+    "globals": "16.5.0"
   }
 }
