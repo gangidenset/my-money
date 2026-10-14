@@ -4,6 +4,7 @@ import {
   monthlyIncome, monthlyPlan, allowance, freeUsed, futureSavings, judgeSpend, futureInvestment, nisaCheck,
   allocate, weeklyOf, weekStartKey, historyAverages, suggestBudget, budgetAlerts,
   requiredMonthly, monthsToReach, formatMonths, incomeGrowth, householdHealth, fixedCostTips, savingEffect,
+  budgetPeriod, periodLabel, frequentEntries, backupReminder,
 } from '../public/js/calc.js';
 
 const groupOf = (id) => (['food', 'daily'].includes(id) ? 'living' : 'free');
@@ -232,4 +233,82 @@ test('節約効果：外食2万→1.5万・サブスク5千→3千・携帯8千�
   assert.equal(e.yearly, 132000);
   assert.equal(e.tenYears, 1320000);
   assert.equal(e.tenYearsInvested, 1320000); // 利回り0%
+});
+
+/* ---------- 改善：給料日区切り・よく使う支出・バックアップ ---------- */
+
+test('予算の1か月：給料日25日なら25日〜翌月24日', () => {
+  const p = budgetPeriod(new Date(2026, 9, 14), 25); // 10/14
+  assert.equal(p.startKey, '2026-09-25');
+  assert.equal(p.endKey, '2026-10-24');
+  assert.equal(p.days, 30);
+  assert.equal(periodLabel(p), '9月25日〜10月24日');
+  assert.equal(budgetPeriod(new Date(2026, 9, 25), 25).startKey, '2026-10-25'); // 給料日当日から新しい期間
+  assert.equal(budgetPeriod(new Date(2026, 9, 24), 25).endKey, '2026-10-24');
+  // 年またぎ・前後の期間
+  assert.equal(budgetPeriod(new Date(2027, 0, 10), 25).startKey, '2026-12-25');
+  assert.equal(budgetPeriod(new Date(2026, 9, 14), 25, -1).startKey, '2026-08-25');
+  assert.equal(budgetPeriod(new Date(2026, 9, 14), 25, 3).endKey, '2027-01-24');
+  // 給料日1日＝暦どおり（2月も末日まで）
+  const feb = budgetPeriod(new Date(2027, 1, 10), 1);
+  assert.deepEqual([feb.startKey, feb.endKey, feb.days], ['2027-02-01', '2027-02-28', 28]);
+  assert.equal(periodLabel(feb), '2027年2月');
+  assert.equal(budgetPeriod(new Date(2026, 9, 14), 31).payday, 28); // 29日以降は28日に丸める
+});
+
+test('給料日区切りで今月・今週・今日の残りを計算する', () => {
+  // 10/23（金）、給料日25日 → 期間は 9/25〜10/24、残り2日。今週は 10/19（月）〜10/24（土）の6日間
+  const a = allowance({
+    plan: { living: 0, free: 30000 },
+    expenses: [
+      { date: '2026-09-24', category: 'eatout', amount: 9999 }, // 前の期間は無視
+      { date: '2026-09-25', category: 'eatout', amount: 18000 },
+      { date: '2026-10-22', category: 'hobby', amount: 2000 },
+    ],
+    groupOf,
+    today: new Date(2026, 9, 23),
+    payday: 25,
+  });
+  assert.equal(a.period.startKey, '2026-09-25');
+  assert.equal(a.daysLeft, 2);
+  assert.equal(a.monthLeft, 10000);
+  assert.equal(a.todayBudget, 5000); // 残り10,000円 ÷ 2日
+  assert.equal(a.weekBudget, 12000); // 週初めの残り12,000円 × 6日 / 6日
+  assert.equal(a.weekLeft, 10000);
+  assert.equal(a.dayOfMonth, 29);
+  assert.equal(a.daysInMonth, 30);
+});
+
+test('実績平均も給料日区切りで集計する', () => {
+  const exps = [
+    { date: '2026-09-24', category: 'food', amount: 30000 }, // 8/25〜9/24 の期間
+    { date: '2026-09-26', category: 'food', amount: 99999 }, // 今の期間（9/25〜）は除外
+  ];
+  const h = historyAverages(exps, new Date(2026, 9, 14), 3, 25);
+  assert.equal(h.months, 1);
+  assert.equal(h.byCategory.food, 30000);
+});
+
+test('よく使う支出：同じカテゴリ・店名・金額が2回以上、回数の多い順', () => {
+  const today = new Date(2026, 9, 14);
+  const e = (date, category, shop, amount) => ({ date, category, shop, amount });
+  const list = frequentEntries([
+    e('2026-10-01', 'food', 'コンビニ', 500), e('2026-10-05', 'food', 'コンビニ', 500), e('2026-10-10', 'food', 'コンビニ ', 500),
+    e('2026-10-02', 'eatout', 'ラーメン', 900), e('2026-10-12', 'eatout', 'ラーメン', 900),
+    e('2026-10-03', 'eatout', 'ラーメン', 1000), // 金額違いは別扱い・1回のみ
+    e('2026-06-01', 'transport', 'バス', 230), e('2026-06-02', 'transport', 'バス', 230), // 90日より前
+  ], today);
+  assert.equal(list.length, 2);
+  assert.deepEqual(list[0], { category: 'food', shop: 'コンビニ', amount: 500, count: 3, last: '2026-10-10' });
+  assert.equal(list[1].shop, 'ラーメン');
+});
+
+test('バックアップのお知らせ：未実施は7日後、実施済みは30日後、「あとで」中は出さない', () => {
+  const now = new Date('2026-10-14T12:00:00');
+  assert.equal(backupReminder({ firstUsedAt: '2026-10-10T00:00:00' }, now), null);
+  assert.deepEqual(backupReminder({ firstUsedAt: '2026-10-01T00:00:00' }, now), { days: 13, never: true });
+  assert.equal(backupReminder({ firstUsedAt: '2026-01-01T00:00:00', lastBackupAt: '2026-09-20T00:00:00' }, now), null);
+  assert.equal(backupReminder({ firstUsedAt: '2026-01-01T00:00:00', lastBackupAt: '2026-09-01T00:00:00' }, now).days, 43);
+  assert.equal(backupReminder({ firstUsedAt: '2026-10-01T00:00:00', snoozedUntil: '2026-10-20T00:00:00' }, now), null);
+  assert.equal(backupReminder({ firstUsedAt: '2026-10-01T00:00:00' }, now, { hasData: false }), null);
 });

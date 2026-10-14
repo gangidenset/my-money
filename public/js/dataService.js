@@ -47,6 +47,7 @@ const DEFAULT_PROFILE = {
   takeHome: 0, // 手取り月収（計算はこちらを優先）
   bonus: 0, // 年間ボーナス（手取り）
   bonusMode: 'separate', // 'monthly' = 毎月換算 / 'separate' = 別管理
+  payday: 1, // 給料日（1〜28）。この日から翌月の前日までを予算の1か月とする。1 = 暦どおり
   otherIncome: 0,
   sideIncome: 0,
   currentSavings: 0,
@@ -140,10 +141,28 @@ export function createDataService(storage) {
       await storage.set('expenses', list);
       return item;
     },
+    async updateExpense(id, patch) {
+      const list = await read('expenses', []);
+      const i = list.findIndex((e) => e.id === id);
+      if (i < 0) throw new Error('支出が見つかりません');
+      list[i] = { ...list[i], ...patch, id };
+      await storage.set('expenses', list);
+      return list[i];
+    },
     async deleteExpense(id) {
       const list = await read('expenses', []);
       await storage.set('expenses', list.filter((e) => e.id !== id));
     },
+    /** 削除の取り消し用。同じ id のまま戻す */
+    async restoreExpense(item) {
+      const list = await read('expenses', []);
+      if (!list.some((e) => e.id === item.id)) list.push(item);
+      await storage.set('expenses', list);
+    },
+
+    // 端末ごとの情報（使い始めた日・最後のバックアップ日）。バックアップには含めない
+    getMeta: () => read('meta', {}),
+    saveMeta: (meta) => storage.set('meta', meta),
 
     async exportAll() {
       const keys = ['profile', 'fixedCosts', 'budgets', 'simulation', 'goal', 'allocations', 'customCategories', 'expenses'];

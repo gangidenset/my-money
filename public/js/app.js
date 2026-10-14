@@ -2,20 +2,24 @@ import { createDefaultStorage } from './storage.js';
 import { createDataService, BUDGET_LABELS, EXTRA_FIXED_COSTS, uid } from './dataService.js';
 import {
   n, yen, sum, monthlyPlan, allowance, judgeSpend, futureSavings, futureInvestment, nisaCheck,
-  summarizeSpending, toDateKey, toMonthKey, parseDateKey,
+  summarizeSpending, toDateKey, parseDateKey,
   ALLOC_CHOICES, allocate, weekStartKey, historyAverages, suggestBudget, budgetAlerts,
   requiredMonthly, monthsToReach, formatMonths, incomeGrowth, householdHealth, fixedCostTips, savingEffect,
+  MAX_PAYDAY, addDays, budgetPeriod, inPeriod, periodLabel, frequentEntries, backupReminder,
 } from './calc.js';
 
 const { adapter, persistent } = createDefaultStorage();
 const ds = createDataService(adapter);
 
 const state = {
-  profile: null, fixedCosts: [], budgets: [], simulation: null, goal: null, allocations: null, categories: [], expenses: [],
+  profile: null, fixedCosts: [], budgets: [], simulation: null, goal: null, allocations: null, categories: [], expenses: [], meta: {},
 };
 const ui = {
   entryCategory: 'food',
-  ledgerMonth: toMonthKey(new Date()),
+  ledgerOffset: 0, // 家計簿で表示中の期間（0 = 今の期間、-1 = 前の期間）
+  editingId: null, // 編集中の支出
+  categoryBeforeEdit: null, // 編集を終えたら、新規記録用のカテゴリ選択を元に戻す
+  quickList: [],
   checkAmount: '',
 };
 
@@ -28,28 +32,59 @@ const catLabel = (id) => {
   return c ? `${c.icon} ${esc(c.name)}` : '❔ 不明';
 };
 const plan = () => monthlyPlan(state);
-const allow = () => allowance({ plan: plan(), expenses: state.expenses, groupOf });
+const payday = () => state.profile.payday || 1;
+const currentPeriod = () => budgetPeriod(new Date(), payday());
+const history = () => historyAverages(state.expenses, new Date(), 3, payday());
+const allow = () => allowance({ plan: plan(), expenses: state.expenses, groupOf, payday: payday() });
 const freeAlloc = () => allocate(plan().free, state.allocations.percents);
 const visitsPerWeek = () => Math.max(1, Math.round(n(state.allocations.eatoutPerWeek)) || 1);
 
-/** 今月・今週（月曜〜今日）のカテゴリ別支出 */
+/** 今の期間・今週（月曜〜今日）のカテゴリ別支出 */
 function categoryUsage(today = new Date()) {
-  const mk = toMonthKey(today);
+  const period = budgetPeriod(today, payday());
   const ws = weekStartKey(today);
   const tk = toDateKey(today);
   const month = {};
   const week = {};
   for (const e of state.expenses) {
-    if (e.date.startsWith(mk)) month[e.category] = (month[e.category] || 0) + n(e.amount);
+    if (inPeriod(period, e.date)) month[e.category] = (month[e.category] || 0) + n(e.amount);
     if (e.date >= ws && e.date <= tk) week[e.category] = (week[e.category] || 0) + n(e.amount);
   }
   return { month, week };
 }
 
 async function loadAll() {
-  [state.profile, state.fixedCosts, state.budgets, state.simulation, state.goal, state.allocations, state.categories, state.expenses] =
-    await Promise.all([ds.getProfile(), ds.listFixedCosts(), ds.listBudgets(), ds.getSimulation(), ds.getGoal(), ds.getAllocations(), ds.listCategories(), ds.listExpenses()]);
+  [state.profile, state.fixedCosts, state.budgets, state.simulation, state.goal, state.allocations, state.categories, state.expenses, state.meta] =
+    await Promise.all([ds.getProfile(), ds.listFixedCosts(), ds.listBudgets(), ds.getSimulation(), ds.getGoal(), ds.getAllocations(), ds.listCategories(), ds.listExpenses(), ds.getMeta()]);
+  if (!state.meta.firstUsedAt) {
+    state.meta.firstUsedAt = new Date().toISOString();
+    await ds.saveMeta(state.meta);
+  }
 }
+
+/* ---------- トースト（取り消しボタン付きのお知らせ） ---------- */
+
+const $toast = document.getElementById('toast');
+let toastTimer;
+let toastAction = null;
+function showToast(message, action = null) {
+  clearTimeout(toastTimer);
+  toastAction = action;
+  $toast.innerHTML = `<span>${esc(message)}</span>${action ? `<button type="button" class="toast-btn">${esc(action.label)}</button>` : ''}`;
+  $toast.hidden = false;
+  toastTimer = setTimeout(hideToast, action ? 6000 : 3000);
+}
+function hideToast() {
+  clearTimeout(toastTimer);
+  $toast.hidden = true;
+  toastAction = null;
+}
+$toast.addEventListener('click', async (ev) => {
+  if (!ev.target.closest('.toast-btn') || !toastAction) return;
+  const { run } = toastAction;
+  hideToast();
+  await run();
+});
 
 /* ---------- 共通パーツ ---------- */
 
@@ -112,12 +147,15 @@ function homeView() {
   const recent = [...state.expenses]
     .sort((x, y) => (y.date + y.id).localeCompare(x.date + x.id))
     .slice(0, 5);
+  const nextPayday = addDays(a.period.end, 1);
+  const untilLabel = payday() > 1 ? `次の給料日（${nextPayday.getMonth() + 1}/${nextPayday.getDate()}）まで` : '月末まで';
+  const endWord = payday() > 1 ? '給料日前日' : '月末';
 
   return `
     <section class="hero ${over ? 'is-over' : ''}">
       <p class="hero-label">今月あと</p>
       <p class="hero-value">${over ? '0円' : yen(a.monthLeft)}</p>
-      <p class="hero-sub">月末まで残り${a.daysLeft}日</p>
+      <p class="hero-sub">${untilLabel}残り${a.daysLeft}日</p>
     </section>
 
     <section class="stat-grid">
@@ -128,6 +166,7 @@ function homeView() {
 
     <p class="advice ${over ? 'caution' : ''}">${headline}</p>
     ${alerts.length ? `<ul class="alerts">${alerts.map((x) => `<li class="${x.level}">${esc(x.message)}</li>`).join('')}</ul>` : ''}
+    ${backupBanner()}
 
     <section class="card">
       <h2>この出費、大丈夫？</h2>
@@ -159,7 +198,7 @@ function homeView() {
       <div class="meter-row"><div class="meter-head"><span>生活費</span><span>${yen(s.living)} / ${yen(p.living)}</span></div>${bar(s.living, p.living)}</div>
       <div class="meter-row"><div class="meter-head"><span>自由に使えるお金</span><span>${yen(a.monthUsed)} / ${yen(Math.max(0, p.free))}</span></div>${bar(a.monthUsed, Math.max(0, p.free))}</div>
       ${livingRows ? `<details><summary>生活費の内訳</summary>${livingRows}</details>` : ''}
-      ${a.dayOfMonth >= 5 && s.total > 0 ? `<p class="note">このペースだと月末の支出は約${yen(a.projectedSpend)}、${a.projectedLeft >= 0 ? `予算が約${yen(a.projectedLeft)}残る見込みです。` : `予算を約${yen(-a.projectedLeft)}超える見込みです。1日あたり${yen(-a.projectedLeft / a.daysLeft)}抑えると予定内に収まります。`}</p>` : ''}
+      ${a.dayOfMonth >= 5 && s.total > 0 ? `<p class="note">このペースだと${endWord}までの支出は約${yen(a.projectedSpend)}、${a.projectedLeft >= 0 ? `予算が約${yen(a.projectedLeft)}残る見込みです。` : `予算を約${yen(-a.projectedLeft)}超える見込みです。1日あたり${yen(-a.projectedLeft / a.daysLeft)}抑えると予定内に収まります。`}</p>` : ''}
     </section>
 
     <section class="card">
@@ -205,30 +244,53 @@ function healthChip() {
 
 function expenseRow(e) {
   const d = parseDateKey(e.date);
-  return `<li class="exp">
-    <span class="exp-cat">${catLabel(e.category)}</span>
-    <span class="exp-main">${esc(e.shop) || '<span class="muted">（店名なし）</span>'}${e.memo ? `<small>${esc(e.memo)}</small>` : ''}</span>
-    <span class="exp-amount">${yen(e.amount)}<small>${d.getMonth() + 1}/${d.getDate()}</small></span>
+  return `<li class="exp ${ui.editingId === e.id ? 'is-editing' : ''}">
+    <button type="button" class="exp-body" data-action="edit-expense" data-id="${esc(e.id)}" aria-label="${yen(e.amount)}の支出を編集">
+      <span class="exp-cat">${catLabel(e.category)}</span>
+      <span class="exp-main">${esc(e.shop) || '<span class="muted">（店名なし）</span>'}${e.memo ? `<small>${esc(e.memo)}</small>` : ''}</span>
+      <span class="exp-amount">${yen(e.amount)}<small>${d.getMonth() + 1}/${d.getDate()}</small></span>
+    </button>
     <button class="icon-btn" data-action="delete-expense" data-id="${esc(e.id)}" aria-label="削除">✕</button>
   </li>`;
+}
+
+function backupBanner() {
+  const r = backupReminder(state.meta, new Date(), { hasData: state.expenses.length > 0 });
+  if (!r) return '';
+  return `<section class="backup-banner" role="status">
+    <p>💾 ${r.never ? 'まだバックアップがありません。' : `最後のバックアップから${r.days}日たちました。`}スマホの故障や機種変更に備えて保存しておきましょう。</p>
+    <div class="btn-row">
+      <button class="btn primary" data-action="export">今すぐ保存</button>
+      <button class="btn" data-action="snooze-backup">あとで</button>
+    </div>
+  </section>`;
 }
 
 /* ---------- 家計簿 ---------- */
 
 function ledgerView() {
-  const mk = ui.ledgerMonth;
-  const list = state.expenses.filter((e) => e.date.startsWith(mk)).sort((x, y) => (y.date + y.id).localeCompare(x.date + x.id));
+  const period = budgetPeriod(new Date(), payday(), ui.ledgerOffset);
+  const list = state.expenses.filter((e) => inPeriod(period, e.date)).sort((x, y) => (y.date + y.id).localeCompare(x.date + x.id));
   const s = summarizeSpending(list, groupOf);
-  const [y, m] = mk.split('-').map(Number);
+  const editing = ui.editingId ? state.expenses.find((e) => e.id === ui.editingId) : null;
+  ui.quickList = editing ? [] : frequentEntries(state.expenses);
 
   const byDate = {};
   list.forEach((e) => (byDate[e.date] ||= []).push(e));
 
   return `
-    <section class="card entry">
-      <h2>支出を記録</h2>
+    <section class="card entry ${editing ? 'is-editing' : ''}">
+      <h2>${editing ? '✏️ 支出を編集' : '支出を記録'}</h2>
+      ${ui.quickList.length ? `<div class="quick">
+        <p class="quick-label">よく使う（タップですぐ記録）</p>
+        <div class="quick-list">
+          ${ui.quickList.map((q, i) => `<button type="button" class="quick-btn" data-action="quick-add" data-index="${i}">
+            <span>${catMap()[q.category]?.icon ?? '❔'} ${esc(q.shop || catMap()[q.category]?.name || '')}</span><strong>${yen(q.amount)}</strong>
+          </button>`).join('')}
+        </div>
+      </div>` : ''}
       <span class="money-input big">
-        <input type="number" inputmode="numeric" min="1" id="entry-amount" placeholder="0" autocomplete="off">
+        <input type="number" inputmode="numeric" min="1" id="entry-amount" placeholder="0" autocomplete="off" value="${editing ? n(editing.amount) : ''}">
         <span class="unit">円</span>
       </span>
       <div class="cat-grid" role="radiogroup" aria-label="カテゴリ">
@@ -238,19 +300,21 @@ function ledgerView() {
           </button>`).join('')}
       </div>
       <div class="entry-extra">
-        <label class="field"><span class="field-label">日付</span><input type="date" id="entry-date" value="${toDateKey(new Date())}"></label>
-        <label class="field"><span class="field-label">店名</span><input type="text" id="entry-shop" placeholder="任意" maxlength="40"></label>
-        <label class="field"><span class="field-label">メモ</span><input type="text" id="entry-memo" placeholder="任意" maxlength="80"></label>
+        <label class="field"><span class="field-label">日付</span><input type="date" id="entry-date" value="${editing ? esc(editing.date) : toDateKey(new Date())}"></label>
+        <label class="field"><span class="field-label">店名</span><input type="text" id="entry-shop" placeholder="任意" maxlength="40" value="${editing ? esc(editing.shop) : ''}"></label>
+        <label class="field"><span class="field-label">メモ</span><input type="text" id="entry-memo" placeholder="任意" maxlength="80" value="${editing ? esc(editing.memo) : ''}"></label>
       </div>
-      <button class="btn primary block" data-action="add-expense">記録する</button>
+      ${editing
+        ? `<div class="btn-row"><button class="btn" data-action="cancel-edit">キャンセル</button><button class="btn primary" data-action="save-expense">更新する</button></div>`
+        : '<button class="btn primary block" data-action="add-expense">記録する</button>'}
       <p class="entry-msg" id="entry-msg" aria-live="polite"></p>
     </section>
 
     <section class="card">
       <div class="month-nav">
-        <button class="icon-btn" data-action="month" data-delta="-1" aria-label="前の月">‹</button>
-        <h2>${y}年${m}月</h2>
-        <button class="icon-btn" data-action="month" data-delta="1" aria-label="次の月">›</button>
+        <button class="icon-btn" data-action="month" data-delta="-1" aria-label="前の期間">‹</button>
+        <h2>${periodLabel(period)}</h2>
+        <button class="icon-btn" data-action="month" data-delta="1" aria-label="次の期間">›</button>
       </div>
       <dl class="flow compact">
         <div class="total"><dt>支出合計</dt><dd>${yen(s.total)}</dd></div>
@@ -262,7 +326,7 @@ function ledgerView() {
         const wd = '日月火水木金土'[d.getDay()];
         return `<h3 class="date-head">${d.getMonth() + 1}月${d.getDate()}日（${wd}）<span>${yen(sum(items, (e) => e.amount))}</span></h3>
           <ul class="exp-list">${items.map(expenseRow).join('')}</ul>`;
-      }).join('') : '<p class="muted">この月の支出はまだありません。</p>'}
+      }).join('') : '<p class="muted">この期間の支出はまだありません。</p>'}
       <p class="note">固定費（家賃・光熱費など）は予算タブで設定した金額で自動計算されるため、ここでの記録は不要です。</p>
     </section>`;
 }
@@ -285,16 +349,16 @@ function summaryCard() {
 function suggestCard() {
   const p = plan();
   if (n(state.profile.takeHome) <= 0) return '';
-  const history = historyAverages(state.expenses);
-  const sg = suggestBudget(p.income, { investment: p.investment, history });
+  const hist = history();
+  const sg = suggestBudget(p.income, { investment: p.investment, history: hist });
   const untouched = p.living === 0 && p.savings === 0;
-  const src = (x) => (x.source === 'history' ? `<small class="tag">実績${history.months}か月平均</small>` : '<small class="tag muted">目安</small>');
+  const src = (x) => (x.source === 'history' ? `<small class="tag">実績${hist.months}か月平均</small>` : '<small class="tag muted">目安</small>');
   const pctText = Object.entries(sg.percents).map(([id, pct]) => `${catMap()[id]?.name ?? id} ${pct}%`).join('・');
   return `
     <section class="card" id="suggest-card">
       <details ${untouched ? 'open' : ''}>
         <summary>手取り${yen(p.income)}からの予算の目安</summary>
-        <p class="note">一般的な配分をもとにした初期目安です。正解ではないので、暮らしに合わせて調整してください。${history ? '記録がある項目は、あなたの実績を優先しています。' : '家計簿の記録が貯まると、あなたの実績平均を優先して提案します。'}</p>
+        <p class="note">一般的な配分をもとにした初期目安です。正解ではないので、暮らしに合わせて調整してください。${hist ? '記録がある項目は、あなたの実績を優先しています。' : '家計簿の記録が貯まると、あなたの実績平均を優先して提案します。'}</p>
         <dl class="flow suggest">
           <div><dt>固定費 <small class="tag muted">目安</small></dt><dd>${yen(sg.fixed)}<small>今 ${yen(p.fixed)}</small></dd></div>
           ${Object.entries(sg.living).map(([id, x]) => `<div><dt>${esc(BUDGET_LABELS[id])} ${src(x)}</dt><dd>${yen(x.amount)}</dd></div>`).join('')}
@@ -349,8 +413,8 @@ function allocCard() {
 function budgetView() {
   const pr = state.profile;
   const usedExtras = new Set(state.fixedCosts.map((c) => c.name));
-  const history = historyAverages(state.expenses);
-  const histHint = (id) => (history?.byCategory[id] != null ? `過去${history.months}か月平均 ${yen(history.byCategory[id])}` : '');
+  const hist = history();
+  const histHint = (id) => (hist?.byCategory[id] != null ? `過去${hist.months}か月平均 ${yen(hist.byCategory[id])}` : '');
   return `
     ${summaryCard()}
     ${suggestCard()}
@@ -366,6 +430,13 @@ function budgetView() {
         <button type="button" data-action="bonus-mode" data-mode="monthly" class="${pr.bonusMode === 'monthly' ? 'selected' : ''}">毎月に換算</button>
       </div>
       <p class="note">毎月に換算すると、ボーナスの1/12を毎月の収入に加えます。</p>
+      <label class="field payday-field">
+        <span class="field-label">給料日<small>この日から次の給料日の前日までを「1か月」として計算します</small></span>
+        <select data-bind="profile.payday" data-num>
+          ${Array.from({ length: MAX_PAYDAY }, (_, i) => i + 1).map((d) => `<option value="${d}" ${payday() === d ? 'selected' : ''}>${d === 1 ? '1日（暦どおり・月末締め）' : `${d}日`}</option>`).join('')}
+        </select>
+      </label>
+      <p class="note">29〜31日が給料日の場合は28日を選んでください。</p>
       <details>
         <summary>月給（額面）も記録する</summary>
         ${moneyInput('profile.grossSalary', pr.grossSalary, '月給（額面）', { hint: '参考値。計算には使いません' })}
@@ -679,7 +750,7 @@ function simResult() {
 
 /* ---------- PWA（ホーム画面に追加・オフライン） ---------- */
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 let installPrompt = null;
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -730,6 +801,40 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 // ホーム画面から使う場合は、端末の空き容量が少なくてもデータが消されにくくする
 if (isStandalone()) navigator.storage?.persist?.();
 
+function lastBackupText() {
+  const at = state.meta.lastBackupAt;
+  if (!at) return '💾 まだバックアップしていません';
+  const d = new Date(at);
+  const days = Math.floor((Date.now() - d) / 86400000);
+  return `💾 最後のバックアップ：${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}（${days === 0 ? '今日' : `${days}日前`}）`;
+}
+
+/** バックアップファイルを作り、スマホでは共有メニュー（ファイルに保存・LINE など）、PC ではダウンロードで保存する */
+async function exportBackup() {
+  const json = JSON.stringify(await ds.exportAll(), null, 2);
+  const name = `my-money-backup-${toDateKey(new Date())}.json`;
+  const file = new File([json], name, { type: 'application/json' });
+  const touch = matchMedia('(pointer: coarse)').matches;
+  if (touch && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: 'my-money バックアップ' });
+    } catch (err) {
+      if (err.name === 'AbortError') return false; // 共有をキャンセルした
+      throw err;
+    }
+  } else {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(file);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  state.meta.lastBackupAt = new Date().toISOString();
+  delete state.meta.snoozedUntil;
+  await ds.saveMeta(state.meta);
+  return true;
+}
+
 function settingsView() {
   const custom = state.categories.filter((c) => c.custom);
   return `
@@ -749,9 +854,11 @@ function settingsView() {
       ${custom.length ? `<ul class="plain-list">${custom.map((c) => `<li><span>${c.icon} ${esc(c.name)} <small class="muted">${c.group === 'living' ? '生活費' : '自由費'}</small></span><button class="icon-btn" data-action="delete-category" data-id="${esc(c.id)}" aria-label="${esc(c.name)}を削除">✕</button></li>`).join('')}</ul>` : ''}
     </section>
 
-    <section class="card">
+    <section class="card" id="data-card">
       <h2>データ</h2>
       <p class="note">${persistent ? 'データはこの端末のブラウザ内にだけ保存され、外部には送信されません。' : '⚠ このブラウザでは保存ができないため、ページを閉じるとデータが消えます。'}</p>
+      <p class="backup-status">${lastBackupText()}</p>
+      ${isIOS() && !isStandalone() ? '<p class="note caution">Safari のまま使っていると、しばらくアプリを開かなかったときにデータが消えることがあります。ホーム画面に追加して使うと安心です。</p>' : ''}
       <div class="btn-row">
         <button class="btn" data-action="export">バックアップを保存</button>
         <label class="btn">バックアップから復元<input type="file" accept="application/json" id="import-file" hidden></label>
@@ -844,12 +951,16 @@ function setByPath(path, raw, isNumber) {
   else obj[key] = isNumber ? Math.max(0, n(raw)) : raw;
 }
 
+function onBoundInput(t) {
+  setByPath(t.dataset.bind, t.value, t.type === 'number' || 'num' in t.dataset);
+  schedulePersist(t.dataset.bind.split('.')[0]);
+  refreshLive();
+}
+
 $main.addEventListener('input', (ev) => {
   const t = ev.target;
   if (t.dataset.bind) {
-    setByPath(t.dataset.bind, t.value, t.type === 'number');
-    schedulePersist(t.dataset.bind.split('.')[0]);
-    refreshLive();
+    onBoundInput(t);
   } else if (t.id === 'check-amount') {
     ui.checkAmount = t.value;
     const res = judgeSpend(t.value, allow());
@@ -860,6 +971,8 @@ $main.addEventListener('input', (ev) => {
 });
 
 $main.addEventListener('change', async (ev) => {
+  // 古いブラウザでは select が input イベントを出さないため change でも受け取る
+  if (ev.target.tagName === 'SELECT' && ev.target.dataset.bind) return onBoundInput(ev.target);
   if (ev.target.id !== 'import-file') return;
   const file = ev.target.files[0];
   if (!file) return;
@@ -876,30 +989,95 @@ $main.addEventListener('change', async (ev) => {
 $main.addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter' && ev.target.id === 'entry-amount') {
     ev.preventDefault();
-    addExpense();
+    if (ui.editingId) saveExpense();
+    else addExpense();
   }
 });
 
-async function addExpense() {
+/** 日付が含まれる期間が、今の期間からいくつ前／後か */
+function periodOffsetOf(dateKey) {
+  const cur = currentPeriod().start;
+  const target = budgetPeriod(parseDateKey(dateKey), payday()).start;
+  return (target.getFullYear() - cur.getFullYear()) * 12 + target.getMonth() - cur.getMonth();
+}
+
+/** 記録フォームの内容を読み取る。金額がなければ null */
+function readEntryForm() {
   const amountEl = document.getElementById('entry-amount');
-  const msg = document.getElementById('entry-msg');
   const amount = Math.round(n(amountEl.value));
   if (amount <= 0) {
+    const msg = document.getElementById('entry-msg');
     msg.textContent = '金額を入力してください。';
     msg.className = 'entry-msg error';
     amountEl.focus();
-    return;
+    return null;
   }
-  const date = document.getElementById('entry-date').value || toDateKey(new Date());
-  const item = await ds.addExpense({
-    date,
+  return {
+    date: document.getElementById('entry-date').value || toDateKey(new Date()),
     amount,
     category: ui.entryCategory,
     shop: document.getElementById('entry-shop').value.trim(),
     memo: document.getElementById('entry-memo').value.trim(),
+  };
+}
+
+function endEdit() {
+  ui.editingId = null;
+  if (ui.categoryBeforeEdit && catMap()[ui.categoryBeforeEdit]) ui.entryCategory = ui.categoryBeforeEdit;
+  ui.categoryBeforeEdit = null;
+}
+
+async function deleteExpenseWithUndo(e) {
+  await ds.deleteExpense(e.id);
+  state.expenses = state.expenses.filter((x) => x.id !== e.id);
+  if (ui.editingId === e.id) endEdit();
+  render();
+  showToast(`${yen(e.amount)}（${e.shop || catMap()[e.category]?.name || ''}）を削除しました`, {
+    label: '元に戻す',
+    run: async () => {
+      await ds.restoreExpense(e);
+      state.expenses.push(e);
+      render();
+      showToast('元に戻しました');
+    },
   });
+}
+
+async function saveExpense() {
+  const form = readEntryForm();
+  if (!form) return;
+  const updated = await ds.updateExpense(ui.editingId, form);
+  state.expenses = state.expenses.map((x) => (x.id === updated.id ? updated : x));
+  endEdit();
+  ui.ledgerOffset = periodOffsetOf(updated.date);
+  render();
+  showToast('更新しました');
+}
+
+async function quickAdd(q) {
+  const item = await ds.addExpense({ date: toDateKey(new Date()), amount: q.amount, category: q.category, shop: q.shop, memo: '' });
   state.expenses.push(item);
-  ui.ledgerMonth = date.slice(0, 7);
+  ui.ledgerOffset = 0;
+  render();
+  const a = allow();
+  showToast(`${q.shop || catMap()[q.category]?.name || ''} ${yen(q.amount)}を記録。今週あと${yen(Math.max(0, a.weekLeft))}`, {
+    label: '取り消す',
+    run: async () => {
+      await ds.deleteExpense(item.id);
+      state.expenses = state.expenses.filter((x) => x.id !== item.id);
+      render();
+      showToast('取り消しました');
+    },
+  });
+}
+
+async function addExpense() {
+  const form = readEntryForm();
+  if (!form) return;
+  const item = await ds.addExpense(form);
+  const { amount } = item;
+  state.expenses.push(item);
+  ui.ledgerOffset = periodOffsetOf(item.date);
   render();
   const a = allow();
   const m = document.getElementById('entry-msg');
@@ -926,19 +1104,44 @@ $main.addEventListener('click', async (ev) => {
       break;
     case 'delete-expense': {
       const e = state.expenses.find((x) => x.id === btn.dataset.id);
-      if (!e || !confirm(`${yen(e.amount)}（${e.shop || catMap()[e.category]?.name || ''}）を削除しますか？`)) return;
-      await ds.deleteExpense(e.id);
-      state.expenses = state.expenses.filter((x) => x.id !== e.id);
-      render();
+      if (e) await deleteExpenseWithUndo(e);
       break;
     }
-    case 'month': {
-      const d = parseDateKey(ui.ledgerMonth + '-01');
-      d.setMonth(d.getMonth() + Number(btn.dataset.delta));
-      ui.ledgerMonth = toMonthKey(d);
-      render();
+    case 'edit-expense': {
+      const e = state.expenses.find((x) => x.id === btn.dataset.id);
+      if (!e) return;
+      if (!ui.editingId) ui.categoryBeforeEdit = ui.entryCategory;
+      ui.editingId = e.id;
+      ui.entryCategory = e.category;
+      ui.ledgerOffset = periodOffsetOf(e.date);
+      if (currentRoute() === 'ledger') render();
+      else location.hash = '#/ledger';
+      window.scrollTo(0, 0);
+      document.getElementById('entry-amount')?.focus();
       break;
     }
+    case 'save-expense':
+      await saveExpense();
+      break;
+    case 'cancel-edit':
+      endEdit();
+      render();
+      break;
+    case 'quick-add': {
+      const q = ui.quickList[Number(btn.dataset.index)];
+      if (q) await quickAdd(q);
+      break;
+    }
+    case 'month':
+      ui.ledgerOffset += Number(btn.dataset.delta);
+      render();
+      break;
+    case 'snooze-backup':
+      state.meta.snoozedUntil = addDays(new Date(), 7).toISOString();
+      await ds.saveMeta(state.meta);
+      render();
+      showToast('7日後にもう一度お知らせします');
+      break;
     case 'bonus-mode':
       state.profile.bonusMode = btn.dataset.mode;
       await ds.saveProfile(state.profile);
@@ -969,7 +1172,7 @@ $main.addEventListener('click', async (ev) => {
     case 'apply-suggest': {
       flushSaves();
       const p = plan();
-      const sg = suggestBudget(p.income, { investment: p.investment, history: historyAverages(state.expenses) });
+      const sg = suggestBudget(p.income, { investment: p.investment, history: history() });
       for (const b of state.budgets) {
         if (sg.living[b.category] && n(b.monthlyLimit) === 0) b.monthlyLimit = sg.living[b.category].amount;
       }
@@ -1012,15 +1215,16 @@ $main.addEventListener('click', async (ev) => {
       render();
       break;
     }
-    case 'export': {
-      const blob = new Blob([JSON.stringify(await ds.exportAll(), null, 2)], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `my-money-backup-${toDateKey(new Date())}.json`;
-      a.click();
-      URL.revokeObjectURL(a.href);
+    case 'export':
+      try {
+        if (await exportBackup()) {
+          render();
+          showToast('バックアップを保存しました');
+        }
+      } catch (err) {
+        alert('バックアップを保存できませんでした：' + err.message);
+      }
       break;
-    }
     case 'reset':
       if (!confirm('すべてのデータを削除します。元に戻せません。よろしいですか？')) return;
       await ds.resetAll();
@@ -1033,6 +1237,7 @@ $main.addEventListener('click', async (ev) => {
 
 window.addEventListener('hashchange', () => {
   flushSaves();
+  if (currentRoute() !== 'ledger' && ui.editingId) endEdit();
   render();
   window.scrollTo(0, 0);
 });

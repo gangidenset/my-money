@@ -50,58 +50,84 @@ export function freeUsed(expenses, groupOf, livingBudget) {
   return s.free + Math.max(0, s.living - livingBudget);
 }
 
-/**
- * 今月・今週・今日あといくら使えるか。
- * 今週＝月曜〜日曜（月をまたぐ場合は今月分のみ）。
- * 週と日の予算は「その期間の開始時点の残額」を残り日数で按分し、期間内の支出を引く。
- * 将来、給料日・固定費支払日・休日の重み付けを入れる場合は dayWeight を差し替える。
- */
-export function allowance({ plan, expenses, groupOf, today = new Date(), dayWeight = () => 1 }) {
-  const y = today.getFullYear();
-  const m = today.getMonth();
-  const d = today.getDate();
-  const dim = daysInMonth(y, m);
-  const mk = toMonthKey(today);
-  const todayKey = toDateKey(today);
+/* ---------- 予算の1か月（給料日で区切る） ---------- */
 
-  const monthExp = expenses.filter((e) => e.date.startsWith(mk));
+export const MAX_PAYDAY = 28;
+export const addDays = (d, k) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + k);
+const dayOnly = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+export const diffDays = (a, b) => Math.round((dayOnly(b) - dayOnly(a)) / 86400000);
+
+/**
+ * 予算の1か月。payday=1 なら暦どおり（1日〜末日）、25 なら「25日〜翌月24日」。
+ * offset で前（-1）や次（+1）の期間を返す。29〜31日は月によって存在しないため 28 日までとする。
+ */
+export function budgetPeriod(today = new Date(), payday = 1, offset = 0) {
+  const p = Math.min(MAX_PAYDAY, Math.max(1, Math.round(n(payday)) || 1));
+  const m = today.getMonth() - (today.getDate() < p ? 1 : 0) + offset;
+  const start = new Date(today.getFullYear(), m, p);
+  const end = new Date(today.getFullYear(), m + 1, p - 1);
+  return { start, end, startKey: toDateKey(start), endKey: toDateKey(end), days: diffDays(start, end) + 1, payday: p };
+}
+
+export const inPeriod = (period, dateKey) => dateKey >= period.startKey && dateKey <= period.endKey;
+
+export function periodLabel(period) {
+  if (period.payday === 1) return `${period.start.getFullYear()}年${period.start.getMonth() + 1}月`;
+  const f = (d) => `${d.getMonth() + 1}月${d.getDate()}日`;
+  return `${f(period.start)}〜${f(period.end)}`;
+}
+
+/**
+ * 今月・今週・今日あといくら使えるか。「今月」は給料日で区切った予算の1か月。
+ * 今週＝月曜〜日曜（期間をまたぐ場合は期間内の分のみ）。
+ * 週と日の予算は「その期間の開始時点の残額」を残り日数で按分し、期間内の支出を引く。
+ * 将来、固定費支払日・休日の重み付けを入れる場合は dayWeight を差し替える。
+ */
+export function allowance({ plan, expenses, groupOf, today = new Date(), payday = 1, dayWeight = () => 1 }) {
+  const period = budgetPeriod(today, payday);
+  const t0 = dayOnly(today);
+  const todayKey = toDateKey(t0);
+
+  const monthExp = expenses.filter((e) => inPeriod(period, e.date));
   const used = (list) => freeUsed(list, groupOf, plan.living);
   const before = (key) => monthExp.filter((e) => e.date < key);
   const usedUpToToday = used(monthExp.filter((e) => e.date <= todayKey));
   const weight = (from, to) => {
     let w = 0;
-    for (let i = from; i <= to; i++) w += dayWeight(new Date(y, m, i));
+    for (let d = from; d <= to; d = addDays(d, 1)) w += dayWeight(d);
     return w;
   };
-  const restWeight = (from) => weight(from, dim) || 1;
+  const restWeight = (from) => weight(from, period.end) || 1;
 
   const monthUsed = used(monthExp);
   const monthLeft = plan.free - monthUsed;
-  const daysLeft = dim - d + 1;
+  const daysLeft = diffDays(t0, period.end) + 1;
 
   const usedBeforeToday = used(before(todayKey));
-  const todayBudget = (Math.max(0, plan.free - usedBeforeToday) * weight(d, d)) / restWeight(d);
+  const todayBudget = (Math.max(0, plan.free - usedBeforeToday) * weight(t0, t0)) / restWeight(t0);
   const todayLeft = todayBudget - (usedUpToToday - usedBeforeToday);
 
-  const dow = (today.getDay() + 6) % 7; // 月曜=0
-  const weekStartDay = Math.max(1, d - dow);
-  const weekEndDay = Math.min(dim, d - dow + 6);
-  const usedBeforeWeek = used(before(toDateKey(new Date(y, m, weekStartDay))));
-  const weekBudget =
-    (Math.max(0, plan.free - usedBeforeWeek) * weight(weekStartDay, weekEndDay)) / restWeight(weekStartDay);
+  const monday = addDays(t0, -((t0.getDay() + 6) % 7));
+  const weekStart = monday < period.start ? period.start : monday;
+  const sunday = addDays(monday, 6);
+  const weekEnd = sunday > period.end ? period.end : sunday;
+  const usedBeforeWeek = used(before(toDateKey(weekStart)));
+  const weekBudget = (Math.max(0, plan.free - usedBeforeWeek) * weight(weekStart, weekEnd)) / restWeight(weekStart);
   const weekLeft = weekBudget - (usedUpToToday - usedBeforeWeek);
 
+  const dayIndex = diffDays(period.start, t0) + 1;
   const spending = summarizeSpending(monthExp, groupOf);
   const spentSoFar = summarizeSpending(monthExp.filter((e) => e.date <= todayKey), groupOf).total;
-  const projectedSpend = (spentSoFar / d) * dim;
+  const projectedSpend = (spentSoFar / dayIndex) * period.days;
   const projectedLeft = plan.living + plan.free - projectedSpend;
 
   return {
+    period,
     monthUsed, monthLeft, daysLeft,
-    weekBudget, weekLeft, weekDaysLeft: weekEndDay - d + 1,
+    weekBudget, weekLeft, weekDaysLeft: diffDays(t0, weekEnd) + 1,
     todayBudget, todayLeft,
     spending, projectedSpend, projectedLeft,
-    dayOfMonth: d, daysInMonth: dim,
+    dayOfMonth: dayIndex, daysInMonth: period.days,
   };
 }
 
@@ -197,15 +223,15 @@ export function weekStartKey(today = new Date()) {
   return toDateKey(d);
 }
 
-/** 直近 months か月（今月を除く）のうち記録がある月の、カテゴリ別の月平均 */
-export function historyAverages(expenses, today = new Date(), months = 3) {
-  const keys = [];
-  for (let i = 1; i <= months; i++) keys.push(toMonthKey(new Date(today.getFullYear(), today.getMonth() - i, 1)));
-  const present = keys.filter((k) => expenses.some((e) => e.date.startsWith(k)));
+/** 直近 months か月（今の期間を除く）のうち記録がある期間の、カテゴリ別の月平均。期間は給料日で区切る */
+export function historyAverages(expenses, today = new Date(), months = 3, payday = 1) {
+  const periods = [];
+  for (let i = 1; i <= months; i++) periods.push(budgetPeriod(today, payday, -i));
+  const present = periods.filter((p) => expenses.some((e) => inPeriod(p, e.date)));
   if (!present.length) return null;
   const byCategory = {};
   for (const e of expenses) {
-    if (present.some((k) => e.date.startsWith(k))) byCategory[e.category] = (byCategory[e.category] || 0) + n(e.amount);
+    if (present.some((p) => inPeriod(p, e.date))) byCategory[e.category] = (byCategory[e.category] || 0) + n(e.amount);
   }
   for (const k of Object.keys(byCategory)) byCategory[k] /= present.length;
   return { months: present.length, byCategory };
@@ -354,6 +380,43 @@ export function savingEffect(items, ratePct = 0) {
     tenYears: monthly * 120,
     tenYearsInvested: futureInvestment(0, monthly, ratePct, 10).value,
   };
+}
+
+/* ---------- 入力の手間を減らす・データを守る ---------- */
+
+/**
+ * よく使う支出（カテゴリ・店名・金額が同じ記録）を、直近 days 日の回数が多い順に返す。
+ * minCount 回以上記録したものだけを候補にする。
+ */
+export function frequentEntries(expenses, today = new Date(), { days = 90, limit = 6, minCount = 2 } = {}) {
+  const fromKey = toDateKey(addDays(today, -days));
+  const map = new Map();
+  for (const e of expenses) {
+    if (e.date < fromKey) continue;
+    const shop = (e.shop || '').trim();
+    const key = `${e.category}\u0000${shop}\u0000${n(e.amount)}`;
+    const cur = map.get(key) || { category: e.category, shop, amount: n(e.amount), count: 0, last: '' };
+    cur.count += 1;
+    if (e.date > cur.last) cur.last = e.date;
+    map.set(key, cur);
+  }
+  return [...map.values()]
+    .filter((x) => x.count >= minCount)
+    .sort((a, b) => b.count - a.count || b.last.localeCompare(a.last))
+    .slice(0, limit);
+}
+
+/**
+ * バックアップを促すかどうか。一度も取っていなければ使い始めて7日後、
+ * 取っていれば前回から30日後に知らせる。「あとで」を押した場合は snoozedUntil まで出さない。
+ */
+export function backupReminder({ firstUsedAt, lastBackupAt, snoozedUntil } = {}, now = new Date(), { hasData = true } = {}) {
+  const since = lastBackupAt || firstUsedAt;
+  if (!hasData || !since) return null;
+  if (snoozedUntil && now < new Date(snoozedUntil)) return null;
+  const days = Math.floor((now - new Date(since)) / 86400000);
+  if (days < (lastBackupAt ? 30 : 7)) return null;
+  return { days, never: !lastBackupAt };
 }
 
 export function yen(v) {
