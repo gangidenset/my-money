@@ -170,6 +170,7 @@ export const settingsActions = {
   'reset': async (btn, ev) => {
     if (!confirm('すべてのデータを削除します。元に戻せません。よろしいですか？')) return;
     await ds.resetAll();
+    await ds.migrate(); // 空の状態として今の版を記録する
     await loadAll();
     location.hash = '#/home';
     render();

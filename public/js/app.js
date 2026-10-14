@@ -1,7 +1,7 @@
 import {
   n, judgeSpend, parseMoney, yen,
 } from './calc.js';
-import { ds, state, ui, $main, plan, allow, freeAlloc, visitsPerWeek, loadAll, currentRoute, setRenderer, render, schedulePersist, flushSaves, setByPath } from './core.js';
+import { ds, state, ui, $main, plan, allow, freeAlloc, visitsPerWeek, loadAll, prepareData, currentRoute, setRenderer, render, schedulePersist, flushSaves, setByPath } from './core.js';
 import { formatMoneyField } from './ui.js';
 import { hideTip } from './views/charts.js';
 import { homeView, homeActions } from './views/home.js';
@@ -141,6 +141,15 @@ window.addEventListener('hashchange', () => {
   window.scrollTo(0, 0);
 });
 
-await loadAll();
-render();
+if (await prepareData()) {
+  await loadAll();
+  render();
+} else {
+  // 古いアプリが新しい形式のデータを書き換えて壊さないよう、ここで止める
+  $main.innerHTML = `<section class="card">
+    <h2>アプリを更新してください</h2>
+    <p>このデータは新しいバージョンのアプリで保存されています。ページを再読み込みすると最新のアプリになります。</p>
+    <button class="btn primary block" onclick="location.reload()">再読み込み</button>
+  </section>`;
+}
 updateOnlineBadge();

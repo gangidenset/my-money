@@ -57,6 +57,12 @@ export function categoryUsage(today = new Date()) {
   return { month, week };
 }
 
+/** 起動時：保存データを今の版にそろえる。新しい版のアプリで保存されたデータなら false（書き換えない） */
+export async function prepareData() {
+  const result = await ds.migrate();
+  return result.status !== 'newer';
+}
+
 export async function loadAll() {
   [state.profile, state.fixedCosts, state.budgets, state.simulation, state.goal, state.goals, state.allocations, state.categories, state.expenses, state.meta] =
     await Promise.all([ds.getProfile(), ds.listFixedCosts(), ds.listBudgets(), ds.getSimulation(), ds.getGoal(), ds.listGoals(), ds.getAllocations(), ds.listCategories(), ds.listExpenses(), ds.getMeta()]);

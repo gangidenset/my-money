@@ -71,6 +71,75 @@ const DEFAULT_GOAL = {
   years: 10,
 };
 
+/* ---------- データの版管理 ---------- */
+
+/** 保存データの形式の版。形式を変えたら上げて、MIGRATIONS に変換を追加する */
+export const SCHEMA_VERSION = 2;
+
+/** バックアップ・復元の対象になる保存データ（端末ごとの meta などは含めない） */
+export const DATA_KEYS = ['profile', 'fixedCosts', 'budgets', 'simulation', 'goal', 'goals', 'allocations', 'customCategories', 'expenses'];
+
+const toInt = (v) => {
+  const x = Math.round(Number(v));
+  return Number.isFinite(x) ? x : 0;
+};
+
+/**
+ * 版ごとの変換。キーは「変換後の版」。古い版から順に1つずつ適用する。
+ * 変換は保存データ（storage）を直接読み書きし、何度実行しても同じ結果になるように書く。
+ */
+export const MIGRATIONS = {
+  // v1 → v2：金額を整数にそろえ、日付のない支出を除き、目的別の貯金の項目をそろえる
+  2: async (st) => {
+    const expenses = await st.get('expenses');
+    if (Array.isArray(expenses)) {
+      await st.set('expenses', expenses
+        .filter((e) => /^\d{4}-\d{2}-\d{2}$/.test(e?.date ?? ''))
+        .map((e) => ({ ...e, amount: toInt(e.amount), shop: e.shop ?? '', memo: e.memo ?? '' })));
+    }
+    const fixed = await st.get('fixedCosts');
+    if (Array.isArray(fixed)) await st.set('fixedCosts', fixed.map((c) => ({ ...c, amount: toInt(c.amount) })));
+    const goals = await st.get('goals');
+    if (Array.isArray(goals)) {
+      await st.set('goals', goals.map((g) => ({
+        lastContributionMonth: null, lastContributionAmount: 0, ...g,
+        targetAmount: toInt(g.targetAmount), saved: toInt(g.saved),
+      })));
+    }
+  },
+};
+
+async function hasAnyData(storage) {
+  for (const k of DATA_KEYS) if ((await storage.get(k)) != null) return true;
+  return false;
+}
+
+/**
+ * 保存データを今の版にそろえる。変換する前に、元のデータを preMigrationBackup として残す。
+ * 戻り値 status：'fresh'（初回）/ 'current'（変換なし）/ 'migrated' / 'newer'（新しい版のアプリで保存されたデータ）
+ */
+export async function migrateStorage(storage, migrations = MIGRATIONS, latest = SCHEMA_VERSION) {
+  let version = await storage.get('schemaVersion');
+  if (version == null) {
+    if (!(await hasAnyData(storage))) {
+      await storage.set('schemaVersion', latest);
+      return { status: 'fresh', from: null, to: latest };
+    }
+    version = 1; // 版の記録がなかった頃のデータ
+  }
+  if (version > latest) return { status: 'newer', from: version, to: latest };
+  if (version === latest) return { status: 'current', from: version, to: latest };
+
+  const copy = {};
+  for (const k of DATA_KEYS) copy[k] = await storage.get(k);
+  await storage.set('preMigrationBackup', { fromVersion: version, at: new Date().toISOString(), data: copy });
+  for (let v = version + 1; v <= latest; v++) {
+    if (migrations[v]) await migrations[v](storage);
+    await storage.set('schemaVersion', v);
+  }
+  return { status: 'migrated', from: version, to: latest };
+}
+
 export function uid() {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -168,17 +237,29 @@ export function createDataService(storage) {
     getMeta: () => read('meta', {}),
     saveMeta: (meta) => storage.set('meta', meta),
 
+    /** 保存データを今の版にそろえる（起動時に最初に呼ぶ） */
+    migrate: () => migrateStorage(storage),
+
     async exportAll() {
-      const keys = ['profile', 'fixedCosts', 'budgets', 'simulation', 'goal', 'goals', 'allocations', 'customCategories', 'expenses'];
       const data = {};
-      for (const k of keys) data[k] = await storage.get(k);
-      return { app: 'my-money', version: 1, exportedAt: new Date().toISOString(), data };
+      for (const k of DATA_KEYS) data[k] = await storage.get(k);
+      return { app: 'my-money', version: 1, schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), data };
     },
+    /**
+     * バックアップから復元する。今のデータは丸ごと置き換える（バックアップにない項目は消す）。
+     * 古い版のバックアップは今の版に変換し、新しい版のアプリで作ったものは受け付けない。
+     */
     async importAll(json) {
-      if (json?.app !== 'my-money' || !json.data) throw new Error('my-money のバックアップファイルではありません');
-      for (const [k, v] of Object.entries(json.data)) {
-        if (v != null) await storage.set(k, v);
+      if (json?.app !== 'my-money' || !json.data || typeof json.data !== 'object') throw new Error('my-money のバックアップファイルではありません');
+      const fileVersion = json.schemaVersion ?? 1;
+      if (fileVersion > SCHEMA_VERSION) throw new Error('新しいバージョンのアプリで作ったバックアップです。アプリを最新にしてから復元してください');
+      for (const k of DATA_KEYS) {
+        const v = json.data[k];
+        if (v == null) await storage.remove(k);
+        else await storage.set(k, v);
       }
+      await storage.set('schemaVersion', fileVersion);
+      await migrateStorage(storage);
     },
     resetAll: () => storage.clear(),
   };

@@ -57,3 +57,21 @@ test('スマホでは共有メニューでバックアップを渡す', async ({
   expect(shared.name).toBe('my-money-backup-2026-10-14.json');
   expect(JSON.parse(shared.text).data.expenses[0].amount).toBe(777);
 });
+
+test('古い形式のデータで開くと、今の形式に変換して使える', async ({ page }) => {
+  const data = baseData();
+  data.expenses = [expense('e1', '2026-10-10', 'eatout', '1200')]; // 金額が文字列の古いデータ
+  await openApp(page, { data });
+  await expect(page.locator('.hero-value')).toHaveText('82,800円');
+  expect((await stored(page, 'expenses'))[0].amount).toBe(1200);
+  expect(await stored(page, 'schemaVersion')).toBeGreaterThanOrEqual(2);
+  expect((await stored(page, 'preMigrationBackup')).data.expenses[0].amount).toBe('1200');
+});
+
+test('新しい版のアプリで保存されたデータなら、書き換えずに更新を促す', async ({ page }) => {
+  const data = baseData();
+  data.schemaVersion = 999;
+  await openApp(page, { data });
+  await expect(page.getByRole('heading', { name: 'アプリを更新してください' })).toBeVisible();
+  expect(await stored(page, 'schemaVersion')).toBe(999);
+});
