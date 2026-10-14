@@ -419,6 +419,79 @@ export function backupReminder({ firstUsedAt, lastBackupAt, snoozedUntil } = {},
   return { days, never: !lastBackupAt };
 }
 
+/* ---------- グラフ用の集計 ---------- */
+
+/**
+ * 直近 count 期間（給料日区切り）の収支。家計簿の記録が始まる前の期間は含めない。
+ * 収入・固定費は履歴を持たないため、今の設定額で計算する。
+ * 今の期間（current）は途中なので、貯蓄は「このペースで使った場合の見込み」を返す。
+ */
+export function periodHistory({ expenses, plan, groupOf, payday = 1, today = new Date(), count = 6 }) {
+  if (!expenses.length) return [];
+  const firstKey = expenses.reduce((m, e) => (e.date < m ? e.date : m), expenses[0].date);
+  const todayKey = toDateKey(today);
+  const rows = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const period = budgetPeriod(today, payday, -i);
+    if (period.endKey < firstKey) continue;
+    const list = expenses.filter((e) => inPeriod(period, e.date));
+    const s = summarizeSpending(list, groupOf);
+    const current = i === 0;
+    let spendForSaving = s.total;
+    if (current) {
+      const soFar = sum(list.filter((e) => e.date <= todayKey), (e) => e.amount);
+      spendForSaving = (soFar / (diffDays(period.start, today) + 1)) * period.days;
+    }
+    rows.push({
+      period, current,
+      income: plan.income, fixed: plan.fixed, living: s.living, free: s.free, spent: s.total,
+      saved: plan.income - plan.fixed - spendForSaving,
+      planned: plan.savings + n(plan.investment),
+    });
+  }
+  return rows;
+}
+
+/** 0 を含むきりのよい目盛り（1・2・2.5・5 × 10^n 刻み） */
+export function niceScale(lo, hi, count = 4) {
+  const min = Math.min(0, lo);
+  const max = Math.max(0, hi);
+  if (max - min <= 0) return { min: 0, max: 1, ticks: [0] };
+  const raw = (max - min) / count;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
+  const top = Math.ceil(max / step) * step;
+  const bottom = Math.floor(min / step) * step;
+  const ticks = [];
+  for (let v = bottom; v <= top + step / 1e6; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
+  return { min: bottom, max: top, ticks };
+}
+
+/** 目盛り用の短い金額表記（例：120000 → 12万、25000 → 2.5万） */
+export function compactYen(v) {
+  const a = Math.abs(v);
+  const sign = v < 0 ? '−' : '';
+  if (a >= 10000) return `${sign}${Math.round((a / 10000) * 10) / 10}万`;
+  return `${sign}${Math.round(a).toLocaleString('ja-JP')}`;
+}
+
+/* ---------- 金額入力（カンマ区切り） ---------- */
+
+/** 全角数字を半角に */
+export const toHalfWidth = (s) => String(s ?? '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+
+/** 「300,000」「３０００００円」などを数値に。数字がなければ 0 */
+export function parseMoney(s) {
+  const digits = toHalfWidth(s).replace(/\D/g, '');
+  return digits ? Number(digits) : 0;
+}
+
+/** 入力中の文字列を「300,000」の形に整える。空欄は空欄のまま */
+export function formatMoneyText(s) {
+  const digits = toHalfWidth(s).replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, 12);
+  return digits ? Number(digits).toLocaleString('ja-JP') : '';
+}
+
 export function yen(v) {
   return Math.round(n(v)).toLocaleString('ja-JP') + '円';
 }

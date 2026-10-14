@@ -5,6 +5,7 @@ import {
   allocate, weeklyOf, weekStartKey, historyAverages, suggestBudget, budgetAlerts,
   requiredMonthly, monthsToReach, formatMonths, incomeGrowth, householdHealth, fixedCostTips, savingEffect,
   budgetPeriod, periodLabel, frequentEntries, backupReminder,
+  periodHistory, niceScale, compactYen, parseMoney, formatMoneyText,
 } from '../public/js/calc.js';
 
 const groupOf = (id) => (['food', 'daily'].includes(id) ? 'living' : 'free');
@@ -311,4 +312,46 @@ test('バックアップのお知らせ：未実施は7日後、実施済みは3
   assert.equal(backupReminder({ firstUsedAt: '2026-01-01T00:00:00', lastBackupAt: '2026-09-01T00:00:00' }, now).days, 43);
   assert.equal(backupReminder({ firstUsedAt: '2026-10-01T00:00:00', snoozedUntil: '2026-10-20T00:00:00' }, now), null);
   assert.equal(backupReminder({ firstUsedAt: '2026-10-01T00:00:00' }, now, { hasData: false }), null);
+});
+
+/* ---------- グラフ・金額入力 ---------- */
+
+test('期間ごとの収支：記録開始前の期間は除き、今の期間の貯蓄は見込みで出す', () => {
+  const plan = { income: 300000, fixed: 100000, savings: 50000, investment: 10000 };
+  const rows = periodHistory({
+    expenses: [
+      { date: '2026-08-10', category: 'food', amount: 40000 },
+      { date: '2026-08-20', category: 'eatout', amount: 20000 },
+      { date: '2026-10-01', category: 'food', amount: 7000 },
+      { date: '2026-10-07', category: 'eatout', amount: 7000 },
+    ],
+    plan, groupOf, today: new Date(2026, 9, 14), count: 6,
+  });
+  assert.deepEqual(rows.map((r) => r.period.startKey), ['2026-08-01', '2026-09-01', '2026-10-01']);
+  assert.deepEqual([rows[0].living, rows[0].free, rows[0].saved, rows[0].planned], [40000, 20000, 140000, 60000]);
+  assert.equal(rows[1].spent, 0);
+  assert.equal(rows[2].current, true);
+  assert.equal(rows[2].saved, 300000 - 100000 - (14000 / 14) * 31); // 1日1,000円ペースで31日分
+  assert.deepEqual(periodHistory({ expenses: [], plan, groupOf }), []);
+});
+
+test('目盛りはきりのよい数で、0 を含む', () => {
+  assert.deepEqual(niceScale(0, 287000).ticks, [0, 100000, 200000, 300000]);
+  assert.deepEqual(niceScale(0, 287000, 5).ticks, [0, 100000, 200000, 300000]);
+  assert.deepEqual(niceScale(-30000, 90000), { min: -50000, max: 100000, ticks: [-50000, 0, 50000, 100000] });
+  assert.deepEqual(niceScale(0, 0).ticks, [0]);
+  assert.equal(compactYen(120000), '12万');
+  assert.equal(compactYen(25000), '2.5万');
+  assert.equal(compactYen(-50000), '−5万');
+  assert.equal(compactYen(5000), '5,000');
+});
+
+test('金額入力：カンマ・全角数字・円を受け付ける', () => {
+  assert.equal(parseMoney('300,000'), 300000);
+  assert.equal(parseMoney('３００，０００円'), 300000);
+  assert.equal(parseMoney(''), 0);
+  assert.equal(formatMoneyText('300000'), '300,000');
+  assert.equal(formatMoneyText('０１２３４'), '1,234');
+  assert.equal(formatMoneyText('0'), '0');
+  assert.equal(formatMoneyText('abc'), '');
 });

@@ -6,6 +6,7 @@ import {
   ALLOC_CHOICES, allocate, weekStartKey, historyAverages, suggestBudget, budgetAlerts,
   requiredMonthly, monthsToReach, formatMonths, incomeGrowth, householdHealth, fixedCostTips, savingEffect,
   MAX_PAYDAY, addDays, budgetPeriod, inPeriod, periodLabel, frequentEntries, backupReminder,
+  periodHistory, niceScale, compactYen, parseMoney, formatMoneyText,
 } from './calc.js';
 
 const { adapter, persistent } = createDefaultStorage();
@@ -17,6 +18,7 @@ const state = {
 const ui = {
   entryCategory: 'food',
   ledgerOffset: 0, // 家計簿で表示中の期間（0 = 今の期間、-1 = 前の期間）
+  ledgerMode: 'list', // 'list' = 記録 / 'chart' = グラフ
   editingId: null, // 編集中の支出
   categoryBeforeEdit: null, // 編集を終えたら、新規記録用のカテゴリ選択を元に戻す
   quickList: [],
@@ -88,11 +90,17 @@ $toast.addEventListener('click', async (ev) => {
 
 /* ---------- 共通パーツ ---------- */
 
+/** 金額欄の表示用（0 は空欄） */
+const moneyValue = (v) => (n(v) ? Math.round(n(v)).toLocaleString('ja-JP') : '');
+const moneyAttrs = 'type="text" inputmode="numeric" autocomplete="off" maxlength="15" data-money';
+
 const numberInput = (bind, value, label, { hint, unit = '円', step = 1, max } = {}) => `
   <label class="field">
     <span class="field-label">${label}${hint ? `<small>${hint}</small>` : ''}</span>
     <span class="money-input">
-      <input type="number" inputmode="${step < 1 ? 'decimal' : 'numeric'}" min="0" step="${step}"${max ? ` max="${max}"` : ''} data-bind="${bind}" value="${n(value) || ''}" placeholder="0">
+      ${unit === '円'
+        ? `<input ${moneyAttrs} data-bind="${bind}" value="${moneyValue(value)}" placeholder="0">`
+        : `<input type="number" inputmode="${step < 1 ? 'decimal' : 'numeric'}" min="0" step="${step}"${max ? ` max="${max}"` : ''} data-bind="${bind}" value="${n(value) || ''}" placeholder="0">`}
       <span class="unit">${unit}</span>
     </span>
   </label>`;
@@ -129,7 +137,7 @@ function homeView() {
       ? `今週あと${yen(a.weekLeft)}使えます。今日は${yen(Math.max(0, a.todayLeft))}までなら予定内です。`
       : `今週の予算は使い切りました。今月はまだ${yen(a.monthLeft)}残っているので、来週以降で調整できます。`;
 
-  const check = judgeSpend(ui.checkAmount, a);
+  const check = judgeSpend(parseMoney(ui.checkAmount), a);
 
   const livingRows = state.budgets
     .filter((b) => n(b.monthlyLimit) > 0 && catMap()[b.category])
@@ -171,7 +179,7 @@ function homeView() {
     <section class="card">
       <h2>この出費、大丈夫？</h2>
       <span class="money-input">
-        <input type="number" inputmode="numeric" min="0" id="check-amount" value="${esc(ui.checkAmount)}" placeholder="使いたい金額">
+        <input ${moneyAttrs} id="check-amount" value="${esc(formatMoneyText(ui.checkAmount))}" placeholder="使いたい金額">
         <span class="unit">円</span>
       </span>
       <p class="check-result ${check ? check.level : ''}" id="check-result">${check ? esc(check.message) : '金額を入れると、今週・今月の予算で判定します。'}</p>
@@ -278,7 +286,14 @@ function ledgerView() {
   const byDate = {};
   list.forEach((e) => (byDate[e.date] ||= []).push(e));
 
+  const modeToggle = `<div class="segmented mode-toggle" role="tablist" aria-label="表示の切り替え">
+    <button type="button" role="tab" data-action="ledger-mode" data-mode="list" class="${ui.ledgerMode === 'list' ? 'selected' : ''}" aria-selected="${ui.ledgerMode === 'list'}">📝 記録</button>
+    <button type="button" role="tab" data-action="ledger-mode" data-mode="chart" class="${ui.ledgerMode === 'chart' ? 'selected' : ''}" aria-selected="${ui.ledgerMode === 'chart'}">📊 グラフ</button>
+  </div>`;
+  if (ui.ledgerMode === 'chart') return modeToggle + chartsView(period);
+
   return `
+    ${modeToggle}
     <section class="card entry ${editing ? 'is-editing' : ''}">
       <h2>${editing ? '✏️ 支出を編集' : '支出を記録'}</h2>
       ${ui.quickList.length ? `<div class="quick">
@@ -290,7 +305,7 @@ function ledgerView() {
         </div>
       </div>` : ''}
       <span class="money-input big">
-        <input type="number" inputmode="numeric" min="1" id="entry-amount" placeholder="0" autocomplete="off" value="${editing ? n(editing.amount) : ''}">
+        <input ${moneyAttrs} id="entry-amount" placeholder="0" value="${editing ? moneyValue(editing.amount) : ''}">
         <span class="unit">円</span>
       </span>
       <div class="cat-grid" role="radiogroup" aria-label="カテゴリ">
@@ -330,6 +345,211 @@ function ledgerView() {
       <p class="note">固定費（家賃・光熱費など）は予算タブで設定した金額で自動計算されるため、ここでの記録は不要です。</p>
     </section>`;
 }
+
+/* ---------- グラフ ---------- */
+
+const chartTips = new Map(); // data-tip-id → { title, rows: [{ key, label, value | text }] }
+function tipAttr(title, rows) {
+  const id = `tip${chartTips.size + 1}`;
+  chartTips.set(id, { title, rows });
+  return `data-tip-id="${id}" tabindex="0"`;
+}
+const shortPeriod = (period) => (period.payday > 1 ? `${period.start.getMonth() + 1}/${period.start.getDate()}〜` : `${period.start.getMonth() + 1}月`);
+
+function chartsView(period) {
+  chartTips.clear();
+  if (!state.expenses.length) {
+    return `<section class="card"><h2>グラフ</h2><p class="muted">家計簿に支出を記録すると、月ごとの収支やカテゴリ別の支出がグラフで表示されます。</p></section>`;
+  }
+  const rows = periodHistory({ expenses: state.expenses, plan: plan(), groupOf, payday: payday() });
+  return `
+    ${categoryChart(period)}
+    ${flowChart(rows)}
+    ${savingChart(rows)}
+    <p class="note center">収入と固定費は、今の設定額で過去の月も計算しています。</p>`;
+}
+
+function tableView(head, body) {
+  return `<details class="table-view"><summary>表で見る</summary>
+    <table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead>
+    <tbody>${body.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>
+  </details>`;
+}
+
+/** 縦棒グラフの枠（目盛り・横軸）。cols は各列の HTML */
+function columnFrame(sc, cols, labels, extra = '') {
+  const pct = (v) => ((v - sc.min) / (sc.max - sc.min)) * 100;
+  return `
+    <div class="plot">
+      ${sc.ticks.map((t) => `<div class="gridline ${t === 0 ? 'base' : ''}" style="bottom:${pct(t)}%"><span>${compactYen(t)}</span></div>`).join('')}
+      ${extra}
+      <div class="cols">${cols.join('')}</div>
+    </div>
+    <div class="x-axis">${labels.join('')}</div>`;
+}
+
+function categoryChart(period) {
+  const list = state.expenses.filter((e) => inPeriod(period, e.date));
+  const by = {};
+  for (const e of list) {
+    by[e.category] ||= { amount: 0, count: 0 };
+    by[e.category].amount += n(e.amount);
+    by[e.category].count += 1;
+  }
+  const rows = Object.entries(by).map(([id, v]) => ({ id, ...v })).sort((a, b) => b.amount - a.amount);
+  const total = sum(rows, (r) => r.amount);
+  const max = rows[0]?.amount || 1;
+  const name = (id) => catMap()[id]?.name ?? '不明';
+  return `
+    <section class="card chart-card">
+      <div class="month-nav">
+        <button class="icon-btn" data-action="month" data-delta="-1" aria-label="前の期間">‹</button>
+        <h2>${periodLabel(period)}</h2>
+        <button class="icon-btn" data-action="month" data-delta="1" aria-label="次の期間">›</button>
+      </div>
+      <p class="chart-title">カテゴリ別の支出 <span class="muted">合計 ${yen(total)}</span></p>
+      ${rows.length ? `<div class="hbars">
+        ${rows.map((r) => `<div class="hbar-row" ${tipAttr(name(r.id), [
+          { key: 's1', label: '金額', value: r.amount },
+          { label: '支出に占める割合', text: `${Math.round((r.amount / total) * 100)}%` },
+          { label: '回数', text: `${r.count}回` },
+        ])}>
+          <span class="hbar-label">${catLabel(r.id)}</span>
+          <span class="hbar-track"><span class="hbar" style="width:${(r.amount / max) * 72}%"></span><span class="hbar-value">${yen(r.amount)}</span></span>
+        </div>`).join('')}
+      </div>
+      ${tableView(['カテゴリ', '金額', '割合', '回数'], rows.map((r) => [esc(name(r.id)), yen(r.amount), `${Math.round((r.amount / total) * 100)}%`, `${r.count}回`]))}`
+      : '<p class="muted">この期間の支出はまだありません。</p>'}
+    </section>`;
+}
+
+function flowChart(rows) {
+  if (!rows.length) return '';
+  const sc = niceScale(0, Math.max(...rows.map((r) => Math.max(r.income, r.fixed + r.spent)), 1));
+  const pct = (v) => ((v - sc.min) / (sc.max - sc.min)) * 100;
+  const cols = rows.map((r) => {
+    const segs = [['s1', r.fixed], ['s2', r.living], ['s3', r.free]].filter(([, v]) => v > 0);
+    return `<div class="col" ${tipAttr(`${periodLabel(r.period)}${r.current ? '（途中）' : ''}`, [
+      { key: 'line', label: '収入', value: r.income },
+      { key: 's1', label: '固定費', value: r.fixed },
+      { key: 's2', label: '生活費', value: r.living },
+      { key: 's3', label: '自由費', value: r.free },
+      { label: '収入 − 支出', value: r.income - r.fixed - r.spent },
+    ])}>
+      <div class="stack" style="height:${pct(r.fixed + r.spent)}%">${segs.map(([cls, v]) => `<span class="${cls}" style="flex-grow:${v}"></span>`).join('')}</div>
+      ${r.income > 0 ? `<span class="ref-tick" style="bottom:${pct(r.income)}%"></span>` : ''}
+    </div>`;
+  });
+  const labels = rows.map((r) => `<span>${shortPeriod(r.period)}${r.current ? '<small>途中</small>' : ''}</span>`);
+  return `
+    <section class="card chart-card">
+      <p class="chart-title">月ごとの収支</p>
+      <p class="legend">
+        <span><i class="key-rect s1"></i>固定費</span><span><i class="key-rect s2"></i>生活費</span>
+        <span><i class="key-rect s3"></i>自由費</span><span><i class="key-line"></i>収入</span>
+      </p>
+      ${columnFrame(sc, cols, labels)}
+      ${tableView(['期間', '収入', '固定費', '生活費', '自由費', '収入 − 支出'], rows.map((r) => [
+        `${shortPeriod(r.period)}${r.current ? '（途中）' : ''}`, yen(r.income), yen(r.fixed), yen(r.living), yen(r.free), yen(r.income - r.fixed - r.spent),
+      ]))}
+    </section>`;
+}
+
+function savingChart(rows) {
+  if (!rows.length) return '';
+  const planned = rows[0].planned;
+  const sc = niceScale(Math.min(...rows.map((r) => r.saved)), Math.max(...rows.map((r) => r.saved), planned));
+  const pct = (v) => ((v - sc.min) / (sc.max - sc.min)) * 100;
+  const z = pct(0);
+  const anyNeg = rows.some((r) => r.saved < 0);
+  const cols = rows.map((r) => {
+    const y = pct(r.saved);
+    const style = r.saved >= 0 ? `bottom:${z}%;height:${y - z}%` : `bottom:${y}%;height:${z - y}%`;
+    return `<div class="col" ${tipAttr(`${periodLabel(r.period)}${r.current ? '（見込み）' : ''}`, [
+      { key: r.saved >= 0 ? 's1' : 'neg', label: r.current ? '残る見込み' : '残ったお金', value: r.saved },
+      { key: 'line', label: '貯蓄・積立の予定', value: planned },
+      { label: '予定との差', value: r.saved - planned },
+    ])}><span class="vbar ${r.saved >= 0 ? 'pos' : 'neg'} ${r.current ? 'is-projected' : ''}" style="${style}"></span></div>`;
+  });
+  const labels = rows.map((r) => `<span>${shortPeriod(r.period)}${r.current ? '<small>見込み</small>' : ''}</span>`);
+  const refline = planned > 0 ? `<div class="refline" style="bottom:${pct(planned)}%"></div>` : '';
+  return `
+    <section class="card chart-card">
+      <p class="chart-title">月ごとに残ったお金（貯蓄の推移）</p>
+      <p class="legend">
+        <span><i class="key-rect s1"></i>残ったお金</span>${anyNeg ? '<span><i class="key-rect neg"></i>足りなかった月</span>' : ''}
+        ${planned > 0 ? `<span><i class="key-line"></i>貯蓄・積立の予定（${yen(planned)}）</span>` : ''}
+      </p>
+      ${columnFrame(sc, cols, labels, refline)}
+      <p class="note">収入 − 固定費 − 記録した支出。今の期間は、このペースで使った場合の見込みです。</p>
+      ${tableView(['期間', '残ったお金', '予定との差'], rows.map((r) => [
+        `${shortPeriod(r.period)}${r.current ? '（見込み）' : ''}`, yen(r.saved), `${r.saved - planned >= 0 ? '+' : ''}${yen(r.saved - planned)}`,
+      ]))}
+    </section>`;
+}
+
+/* ツールチップ：マウスは重ねたとき、スマホはタップ、キーボードはフォーカスで表示 */
+const $tip = document.createElement('div');
+$tip.className = 'chart-tip';
+$tip.setAttribute('role', 'tooltip');
+$tip.hidden = true;
+document.body.append($tip);
+
+function showTip(el) {
+  const t = chartTips.get(el.dataset.tipId);
+  if (!t) return;
+  hideTip();
+  $tip.replaceChildren();
+  const title = document.createElement('p');
+  title.className = 'tip-title';
+  title.textContent = t.title;
+  $tip.append(title);
+  for (const r of t.rows) {
+    const row = document.createElement('p');
+    row.className = 'tip-row';
+    const key = document.createElement('i');
+    key.className = r.key ? `tip-key ${r.key}` : 'tip-key none';
+    const value = document.createElement('strong');
+    value.textContent = r.text ?? yen(r.value);
+    const label = document.createElement('span');
+    label.textContent = r.label;
+    row.append(key, value, label);
+    $tip.append(row);
+  }
+  $tip.hidden = false;
+  el.classList.add('is-active');
+  const anchor = (el.querySelector('.stack, .vbar, .hbar') || el).getBoundingClientRect();
+  const left = Math.min(Math.max(8, anchor.left + anchor.width / 2 - $tip.offsetWidth / 2), innerWidth - $tip.offsetWidth - 8);
+  let top = anchor.top - $tip.offsetHeight - 8;
+  if (top < 8) top = anchor.bottom + 8;
+  $tip.style.left = `${left}px`;
+  $tip.style.top = `${top}px`;
+}
+function hideTip() {
+  $tip.hidden = true;
+  document.querySelectorAll('[data-tip-id].is-active').forEach((x) => x.classList.remove('is-active'));
+}
+$main.addEventListener('pointerover', (ev) => {
+  const el = ev.target.closest('[data-tip-id]');
+  if (el && ev.pointerType === 'mouse') showTip(el);
+});
+$main.addEventListener('pointerout', (ev) => {
+  const el = ev.target.closest('[data-tip-id]');
+  if (el && ev.pointerType === 'mouse' && !el.contains(ev.relatedTarget)) hideTip();
+});
+$main.addEventListener('focusin', (ev) => {
+  const el = ev.target.closest('[data-tip-id]');
+  if (el) showTip(el);
+});
+$main.addEventListener('focusout', (ev) => {
+  if (ev.target.closest('[data-tip-id]')) hideTip();
+});
+$main.addEventListener('click', (ev) => {
+  const el = ev.target.closest('[data-tip-id]');
+  if (el) showTip(el);
+  else hideTip();
+});
+window.addEventListener('scroll', hideTip, { passive: true });
 
 /* ---------- 予算（収入・固定費・生活費・貯蓄） ---------- */
 
@@ -673,7 +893,7 @@ function savingRows() {
         <label class="saving-row">
           <span class="saving-name">${esc(i.name)}<small>今 ${yen(i.current)}</small></span>
           <span class="money-input">
-            <input type="number" inputmode="numeric" min="0" data-bind="simulation.savingPlan.${esc(i.key)}" value="${i.after ?? ''}" placeholder="${i.current}" aria-label="${esc(i.name)}の見直し後の金額">
+            <input ${moneyAttrs} data-bind="simulation.savingPlan.${esc(i.key)}" value="${i.after == null ? '' : Math.round(i.after).toLocaleString('ja-JP')}" placeholder="${moneyValue(i.current)}" aria-label="${esc(i.name)}の見直し後の金額">
             <span class="unit">円</span>
           </span>
         </label>`).join('')}
@@ -750,7 +970,7 @@ function simResult() {
 
 /* ---------- PWA（ホーム画面に追加・オフライン） ---------- */
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 let installPrompt = null;
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -884,6 +1104,7 @@ const currentRoute = () => {
 };
 
 function render() {
+  hideTip();
   const r = currentRoute();
   document.getElementById('page-title').textContent = routes[r].title;
   document.querySelectorAll('.nav a').forEach((a) => a.toggleAttribute('aria-current', a.dataset.route === r));
@@ -952,18 +1173,41 @@ function setByPath(path, raw, isNumber) {
 }
 
 function onBoundInput(t) {
-  setByPath(t.dataset.bind, t.value, t.type === 'number' || 'num' in t.dataset);
+  const money = 'money' in t.dataset;
+  const raw = money && t.value.trim() !== '' ? parseMoney(t.value) : t.value;
+  setByPath(t.dataset.bind, raw, money || t.type === 'number' || 'num' in t.dataset);
   schedulePersist(t.dataset.bind.split('.')[0]);
   refreshLive();
 }
 
+/** 入力中の金額を「300,000」の形に整え、カーソル位置（何桁目か）を保つ */
+function formatMoneyField(el) {
+  const caret = el.selectionStart ?? el.value.length;
+  const digitsBefore = el.value.slice(0, caret).replace(/[^0-9０-９]/g, '').length;
+  const text = formatMoneyText(el.value);
+  if (text === el.value) return;
+  el.value = text;
+  let pos = 0;
+  for (let seen = 0; pos < text.length && seen < digitsBefore; pos++) if (/\d/.test(text[pos])) seen++;
+  el.setSelectionRange(pos, pos);
+}
+
+// 日本語入力（全角）の変換中は整形せず、確定してから整える
+$main.addEventListener('compositionend', (ev) => {
+  if ('money' in ev.target.dataset) ev.target.dispatchEvent(new Event('input', { bubbles: true }));
+});
+
 $main.addEventListener('input', (ev) => {
   const t = ev.target;
+  if ('money' in t.dataset) {
+    if (ev.isComposing) return;
+    formatMoneyField(t);
+  }
   if (t.dataset.bind) {
     onBoundInput(t);
   } else if (t.id === 'check-amount') {
     ui.checkAmount = t.value;
-    const res = judgeSpend(t.value, allow());
+    const res = judgeSpend(parseMoney(t.value), allow());
     const el = document.getElementById('check-result');
     el.className = 'check-result ' + (res ? res.level : '');
     el.textContent = res ? res.message : '金額を入れると、今週・今月の予算で判定します。';
@@ -1004,7 +1248,7 @@ function periodOffsetOf(dateKey) {
 /** 記録フォームの内容を読み取る。金額がなければ null */
 function readEntryForm() {
   const amountEl = document.getElementById('entry-amount');
-  const amount = Math.round(n(amountEl.value));
+  const amount = parseMoney(amountEl.value);
   if (amount <= 0) {
     const msg = document.getElementById('entry-msg');
     msg.textContent = '金額を入力してください。';
@@ -1112,6 +1356,7 @@ $main.addEventListener('click', async (ev) => {
       if (!e) return;
       if (!ui.editingId) ui.categoryBeforeEdit = ui.entryCategory;
       ui.editingId = e.id;
+      ui.ledgerMode = 'list';
       ui.entryCategory = e.category;
       ui.ledgerOffset = periodOffsetOf(e.date);
       if (currentRoute() === 'ledger') render();
@@ -1134,6 +1379,11 @@ $main.addEventListener('click', async (ev) => {
     }
     case 'month':
       ui.ledgerOffset += Number(btn.dataset.delta);
+      render();
+      break;
+    case 'ledger-mode':
+      ui.ledgerMode = btn.dataset.mode;
+      if (ui.ledgerMode === 'chart' && ui.editingId) endEdit();
       render();
       break;
     case 'snooze-backup':
