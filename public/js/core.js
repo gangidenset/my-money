@@ -3,7 +3,7 @@ import { createDataService, uid } from './dataService.js';
 import {
   n, toDateKey, monthlyPlan, budgetPeriod, inPeriod, allowance, allocate, weekStartKey, historyAverages, earmarkedSavings,
   bonusSchedule, planAt, upsertPlanSnapshot, periodLeftover, goalsPaidIn,
-  cardCycle, latestCardUsage, cardUsageStatus,
+  cardCycle, latestCardUsage, cardUsageStatus, spendAmount,
 } from './calc.js';
 
 // アプリ全体で共有する状態・データの読み書き・描画の呼び出し口
@@ -53,11 +53,16 @@ export const cardCycleNow = (today = new Date()) => cardCycle(today, cardSetting
 /** カードで1サイクルに使ってよい額（自分で決めていなければ、毎月の「自由に使えるお金」） */
 export const cardLimit = () => (n(cardSettings().budget) > 0 ? n(cardSettings().budget) : Math.max(0, basePlan().free));
 
+/** 積立投資（NISAなど）をクレジットカードで払っているか */
+export const investViaCard = () => Boolean(state.simulation?.investViaCard) && n(state.simulation?.monthlyInvestment) > 0;
+/** カードの請求額・利用額に含まれる、毎月の積立額 */
+export const cardInvestPart = () => (investViaCard() ? Math.round(n(state.simulation.monthlyInvestment)) : 0);
+
 /** カードの今サイクルの状況（利用額・あと使える額・請求見込み） */
 export function cardStatus(today = new Date()) {
   const cycle = cardCycleNow(today);
   const latest = latestCardUsage(state.cardUsage, cycle);
-  return { cycle, latest, ...cardUsageStatus({ cycle, limit: cardLimit(), latest, today }) };
+  return { cycle, latest, ...cardUsageStatus({ cycle, limit: cardLimit(), latest, today, investment: cardInvestPart() }) };
 }
 
 /** ボーナスの予定（「別管理」のときの使い道） */
@@ -140,8 +145,8 @@ export function categoryUsage(today = new Date()) {
   const month = {};
   const week = {};
   for (const e of state.expenses) {
-    if (inPeriod(period, e.date)) month[e.category] = (month[e.category] || 0) + n(e.amount);
-    if (e.date >= ws && e.date <= tk) week[e.category] = (week[e.category] || 0) + n(e.amount);
+    if (inPeriod(period, e.date)) month[e.category] = (month[e.category] || 0) + spendAmount(e);
+    if (e.date >= ws && e.date <= tk) week[e.category] = (week[e.category] || 0) + spendAmount(e);
   }
   return { month, week };
 }

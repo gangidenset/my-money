@@ -1,5 +1,5 @@
 import {
-  n, sum, inPeriod, periodLabel, periodHistory, niceScale, compactYen, yen, parseDateKey,
+  n, sum, inPeriod, periodLabel, periodHistory, niceScale, compactYen, yen, parseDateKey, spendAmount,
 } from '../calc.js';
 import { state, $main, esc, catMap, groupOf, catLabel, planFor, payday } from '../core.js';
 import { helpBtn } from '../guides.js';
@@ -32,21 +32,27 @@ export /** クレジットカードの請求額の推移（直近6回）と平�
 function cardBillChart() {
   const bills = state.expenses.filter((e) => e.kind === 'cardBill').sort((a, b) => a.date.localeCompare(b.date)).slice(-6);
   if (bills.length < 2) return '';
-  const avg = sum(bills, (b) => b.amount) / bills.length;
-  const sc = niceScale(0, Math.max(...bills.map((b) => b.amount)));
+  // 積立投資の分は除き、カードでの買い物の額で推移を見る
+  const hasInvest = bills.some((b) => n(b.investPart) > 0);
+  const avg = sum(bills, spendAmount) / bills.length;
+  const sc = niceScale(0, Math.max(...bills.map(spendAmount)));
   const pct = (v) => ((v - sc.min) / (sc.max - sc.min)) * 100;
   const label = (b) => `${parseDateKey(b.date).getMonth() + 1}/${parseDateKey(b.date).getDate()}`;
   const cols = bills.map((b) => `<div class="col" ${tipAttr(`${label(b)} の引き落とし`, [
-    { key: 's1', label: '請求額', value: b.amount },
+    { key: 's1', label: hasInvest ? '買い物' : '請求額', value: spendAmount(b) },
+    ...(n(b.investPart) > 0 ? [{ label: `請求額（うち積立${yen(b.investPart)}）`, value: b.amount }] : []),
     { key: 'line', label: '平均', value: avg },
-    { label: '平均との差', value: b.amount - avg },
-  ])}><span class="vbar pos" style="bottom:0;height:${pct(b.amount)}%"></span></div>`);
+    { label: '平均との差', value: spendAmount(b) - avg },
+  ])}><span class="vbar pos" style="bottom:0;height:${pct(spendAmount(b))}%"></span></div>`);
   return `
     <section class="card chart-card">
-      <p class="chart-title">💳 カードの請求額の推移 <span class="muted">平均 ${yen(avg)}</span></p>
-      <p class="legend"><span><i class="key-rect s1"></i>請求額</span><span><i class="key-line"></i>平均</span></p>
+      <p class="chart-title">💳 カードの請求額の推移${hasInvest ? '（積立を除く）' : ''} <span class="muted">平均 ${yen(avg)}</span></p>
+      <p class="legend"><span><i class="key-rect s1"></i>${hasInvest ? '買い物' : '請求額'}</span><span><i class="key-line"></i>平均</span></p>
       ${columnFrame(sc, cols, bills.map((b) => `<span>${label(b)}</span>`), `<div class="refline" style="bottom:${pct(avg)}%"></div>`)}
-      ${tableView(['引き落とし日', '請求額', '平均との差'], bills.map((b) => [label(b), yen(b.amount), `${b.amount - avg >= 0 ? '+' : '−'}${yen(Math.abs(b.amount - avg))}`]))}
+      ${tableView(['引き落とし日', '請求額', ...(hasInvest ? ['うち積立'] : []), '平均との差'], bills.map((b) => [
+        label(b), yen(b.amount), ...(hasInvest ? [yen(n(b.investPart))] : []),
+        `${spendAmount(b) - avg >= 0 ? '+' : '−'}${yen(Math.abs(spendAmount(b) - avg))}`,
+      ]))}
     </section>`;
 }
 
@@ -74,7 +80,7 @@ export function categoryChart(period) {
   const by = {};
   for (const e of list) {
     by[e.category] ||= { amount: 0, count: 0 };
-    by[e.category].amount += n(e.amount);
+    by[e.category].amount += spendAmount(e);
     by[e.category].count += 1;
   }
   const rows = Object.entries(by).map(([id, v]) => ({ id, ...v })).sort((a, b) => b.amount - a.amount);

@@ -9,7 +9,7 @@ import { helpBtn } from '../guides.js';
 
 /* ---------- PWA（ホーム画面に追加・オフライン） ---------- */
 
-export const APP_VERSION = '1.7.0';
+export const APP_VERSION = '1.7.1';
 export let installPrompt = null;
 export const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 export const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);

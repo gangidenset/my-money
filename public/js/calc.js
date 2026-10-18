@@ -6,6 +6,12 @@ export const n = (v) => {
 };
 export const sum = (arr, f = (x) => x) => arr.reduce((s, x) => s + n(f(x)), 0);
 
+/**
+ * 支出として数える額。クレジットカードの請求額に積立投資（NISAなど）が含まれる場合、
+ * その分（investPart）は「積立投資」として別に計算しているので除く。
+ */
+export const spendAmount = (e) => Math.max(0, n(e.amount) - n(e.investPart));
+
 const pad = (x) => String(x).padStart(2, '0');
 export const toDateKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 export const toMonthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
@@ -40,7 +46,7 @@ export function summarizeSpending(expenses, groupOf) {
   let free = 0;
   const byCategory = {};
   for (const e of expenses) {
-    const a = n(e.amount);
+    const a = spendAmount(e);
     byCategory[e.category] = (byCategory[e.category] || 0) + a;
     if (groupOf(e.category) === 'living') living += a;
     else free += a;
@@ -116,16 +122,21 @@ export function latestCardUsage(usage, cycle) {
  * カードで今サイクルあといくら使えるか。
  * used：最後に入れた利用額、projected：入れた日までのペースが締め日まで続いた場合の請求見込み。
  */
-export function cardUsageStatus({ cycle, limit, latest, today = new Date() }) {
+export function cardUsageStatus({ cycle, limit, latest, today = new Date(), investment = 0 }) {
   const used = latest ? n(latest.amount) : 0;
+  // カードで積み立てている場合、利用額には積立分が含まれる。買い物に使った分だけを上限と比べる
+  const inv = Math.max(0, n(investment));
+  const spent = Math.max(0, used - inv);
   const asOf = latest ? parseDateKey(latest.date) : today;
   const elapsed = Math.max(1, diffDays(cycle.start, asOf) + 1);
   const daysLeft = Math.max(1, diffDays(today, cycle.end) + 1);
-  const remaining = n(limit) - used;
+  const remaining = n(limit) - spent;
+  const projectedSpend = latest ? Math.round((spent / elapsed) * cycle.days) : null;
   return {
-    used, limit: n(limit), remaining, daysLeft,
+    used, spent, investment: inv, limit: n(limit), remaining, daysLeft,
     perDay: Math.max(0, remaining) / daysLeft,
-    projected: latest ? Math.round((used / elapsed) * cycle.days) : null,
+    projectedSpend, // 買い物の見込み（上限と比べる額）
+    projected: latest ? projectedSpend + inv : null, // 請求見込み（積立分を含む）
     entered: Boolean(latest),
   };
 }
@@ -138,8 +149,9 @@ export function cardBillReview(bills, current) {
   if (!current) return null;
   const before = bills.filter((b) => b.date < current.date).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
   if (!before.length) return null;
-  const avg = sum(before, (b) => b.amount) / before.length;
-  const diff = n(current.amount) - avg;
+  // 積立投資の分は除き、カードでの買い物の額で比べる
+  const avg = sum(before, spendAmount) / before.length;
+  const diff = spendAmount(current) - avg;
   const pct = avg > 0 ? diff / avg : 0;
   return { avg, diff, pct, count: before.length, level: pct >= 0.1 ? 'up' : pct <= -0.1 ? 'down' : 'same' };
 }
@@ -307,7 +319,7 @@ export function historyAverages(expenses, today = new Date(), months = 3, payday
   if (!present.length) return null;
   const byCategory = {};
   for (const e of expenses) {
-    if (present.some((p) => inPeriod(p, e.date))) byCategory[e.category] = (byCategory[e.category] || 0) + n(e.amount);
+    if (present.some((p) => inPeriod(p, e.date))) byCategory[e.category] = (byCategory[e.category] || 0) + spendAmount(e);
   }
   for (const k of Object.keys(byCategory)) byCategory[k] /= present.length;
   return { months: present.length, byCategory };
@@ -641,7 +653,7 @@ export function periodHistory({ expenses, plan, planFor = () => plan, groupOf, p
     const current = i === 0;
     let spendForSaving = s.total;
     if (current) {
-      const soFar = sum(list.filter((e) => e.date <= todayKey), (e) => e.amount);
+      const soFar = sum(list.filter((e) => e.date <= todayKey), spendAmount);
       spendForSaving = (soFar / (diffDays(period.start, today) + 1)) * period.days;
     }
     const p = planFor(period);

@@ -1,11 +1,11 @@
 import { BUDGET_LABELS, EXTRA_FIXED_COSTS, uid } from '../dataService.js';
 import {
   n, toDateKey, parseDateKey, parseMoney, MAX_PAYDAY, ALLOC_CHOICES, suggestBudget, goalPlan, earmarkedSavings, bonusAllocation, bonusDueThisMonth, yen,
-  dayInPeriod, cardBillIn, cardBillReview, addDays, latestCardUsage,
+  dayInPeriod, cardBillIn, cardBillReview, addDays, latestCardUsage, spendAmount,
 } from '../calc.js';
 import {
   ds, state, esc, catMap, plan, payday, history, freeAlloc, visitsPerWeek, render, flushSaves, bonus, logGoal, unlogGoal,
-  currentPeriod, cardSettings, isCardMode, cardCycleNow, basePlan,
+  currentPeriod, cardSettings, isCardMode, cardCycleNow, basePlan, investViaCard, cardInvestPart,
 } from '../core.js';
 import { showToast, moneyInput, moneyValue, moneyAttrs, signed } from '../ui.js';
 import { helpBtn } from '../guides.js';
@@ -165,6 +165,11 @@ export function budgetView() {
       <h2>積立投資（NISAなど）${helpBtn('invest')}</h2>
       ${moneyInput('simulation.monthlyInvestment', state.simulation.monthlyInvestment, '毎月の積立額')}
       ${moneyInput('profile.currentInvestment', pr.currentInvestment, '現在の投資残高')}
+      ${cardSettings().enabled ? `<label class="check-row">
+        <input type="checkbox" data-action="toggle-invest-card" ${state.simulation.investViaCard ? 'checked' : ''}>
+        <span>クレジットカードで積み立てている</span>
+      </label>
+      <p class="note">チェックすると、カードの請求額・利用額に含まれる積立分を、買い物とは分けて計算します（二重に引かれません）。</p>` : ''}
       <p class="note">利回りや将来の見込みは「将来」タブで確認できます。</p>
     </section>`;
 }
@@ -297,7 +302,8 @@ export function cardBillForm() {
       </span>
       <button type="button" class="btn primary" data-action="card-save-bill">${bill ? '更新' : '記録'}</button>
     </div>
-    ${bill ? `<p class="note ok-text">✅ ${yen(bill.amount)}を記録済みです。</p>${cardReviewText(bill)}`
+    ${investViaCard() ? `<p class="note">請求額はカードの明細どおりに入れてください。うち積立投資の${yen(cardInvestPart())}は「積立投資」として計算します。</p>` : ''}
+    ${bill ? `<p class="note ok-text">✅ ${yen(bill.amount)}を記録済みです${n(bill.investPart) > 0 ? `（うち積立${yen(bill.investPart)}・買い物${yen(spendAmount(bill))}）` : ''}。</p>${cardReviewText(bill)}`
       : prevUsage ? `<p class="note">前のサイクルで最後に入れた利用額は${yen(prevUsage.amount)}です。</p>` : ''}
   </div>`;
 }
@@ -336,7 +342,7 @@ export function cardSection() {
     ${bills.length ? `<h3 class="sub-head">これまでの請求額</h3>
       <ul class="plain-list">${bills.map((b) => {
         const d = parseDateKey(b.date);
-        return `<li><span>${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日</span><strong>${yen(b.amount)}</strong></li>`;
+        return `<li><span>${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日${n(b.investPart) > 0 ? `<small class="muted">うち積立${yen(b.investPart)}</small>` : ''}</span><strong>${yen(b.amount)}</strong></li>`;
       }).join('')}</ul>` : ''}
     <p class="note">請求額は引き落とし日の支出として家計簿に記録され、「自由に使えるお金」から差し引かれます。カードを複数使っている場合は合計を入れてください。</p>
     <button type="button" class="btn ghost block" data-action="card-disable">カードの管理をやめる（記録は残ります）</button>
@@ -391,6 +397,19 @@ export async function saveGoalsAndRender(message, undo) {
 /* ---------- ボタン操作（data-action） ---------- */
 
 export const budgetActions = {
+  /** 積立投資をカードで払っているか。今の期間の請求額にも反映する */
+  'toggle-invest-card': async (btn, ev) => {
+    flushSaves();
+    state.simulation.investViaCard = btn.checked;
+    await ds.saveSimulation(state.simulation);
+    const bill = cardBillIn(state.expenses, currentPeriod());
+    if (bill) {
+      const updated = await ds.updateExpense(bill.id, { investPart: cardInvestPart() });
+      state.expenses = state.expenses.map((x) => (x.id === updated.id ? updated : x));
+    }
+    render();
+    showToast(btn.checked ? 'カードの請求額・利用額から積立分を分けて計算します' : '積立分を分けずに計算します');
+  },
   'card-enable': async (btn, ev) => {
     flushSaves();
     state.profile.card = { ...cardSettings(), enabled: true };
@@ -414,15 +433,15 @@ export const budgetActions = {
     const existing = cardBillIn(state.expenses, currentPeriod());
     let undo;
     if (existing) {
-      const before = existing.amount;
-      const updated = await ds.updateExpense(existing.id, { amount, date: cardPayKey() });
+      const before = { amount: existing.amount, investPart: existing.investPart ?? 0 };
+      const updated = await ds.updateExpense(existing.id, { amount, date: cardPayKey(), investPart: cardInvestPart() });
       state.expenses = state.expenses.map((x) => (x.id === updated.id ? updated : x));
       undo = async () => {
-        const back = await ds.updateExpense(existing.id, { amount: before });
+        const back = await ds.updateExpense(existing.id, before);
         state.expenses = state.expenses.map((x) => (x.id === back.id ? back : x));
       };
     } else {
-      const item = await ds.addExpense({ date: cardPayKey(), amount, category: 'card', shop: 'クレジットカード', memo: '請求額', kind: 'cardBill' });
+      const item = await ds.addExpense({ date: cardPayKey(), amount, category: 'card', shop: 'クレジットカード', memo: '請求額', kind: 'cardBill', investPart: cardInvestPart() });
       state.expenses.push(item);
       undo = async () => {
         await ds.deleteExpense(item.id);

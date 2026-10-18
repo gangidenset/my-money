@@ -658,3 +658,9 @@ input[data-money] { text-align: right; font-variant-numeric: tabular-nums; }
 .flow .review-row { display: block; }
 #card-usage-card .meter-row { margin: 4px 0 10px; }
 #card-usage-card .card-bill-row { margin-top: 4px; }
+
+/* ---- 積立投資をカードで払う ---- */
+.check-row { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-top: 4px; font-size: 0.92rem; cursor: pointer; }
+.check-row input { width: 22px; height: 22px; min-height: 0; accent-color: var(--primary); flex: none; }
+.flow dt small { display: block; font-size: 0.72rem; color: var(--muted); font-weight: 400; white-space: normal; }
+#card-section .plain-list li span small { display: block; font-size: 0.72rem; }

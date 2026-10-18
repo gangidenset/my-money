@@ -1,6 +1,6 @@
 import {
   n, parseDateKey, addDays, toDateKey, judgeSpend, budgetAlerts, householdHealth, backupReminder, parseMoney, formatMoneyText, yen,
-  periodLabel, goalPlan, bonusDueThisMonth, cardBillIn, parseDateKey as parseKey,
+  periodLabel, goalPlan, bonusDueThisMonth, cardBillIn, parseDateKey as parseKey, spendAmount,
 } from '../calc.js';
 import {
   ds, state, ui, esc, catMap, catLabel, plan, basePlan, payday, allow, freeAlloc, visitsPerWeek, categoryUsage, render,
@@ -142,11 +142,12 @@ function cardHero() {
     advice = 'カード会社のアプリやサイトで今月の利用額を見て、下の「カードの利用額」に入れてください。';
   } else if (over) {
     advice = `上限を${yen(-c.remaining)}超えています。次の請求（${md(c.cycle.payKey)}）が多くなるので、締め日まではできるだけカードを使わないようにしましょう。`;
-  } else if (c.projected > c.limit) {
-    advice = `このペースだと請求は約${yen(c.projected)}で、上限を${yen(c.projected - c.limit)}超えそうです。1日あたり${yen(c.perDay)}までにすると収まります。`;
+  } else if (c.projectedSpend > c.limit) {
+    advice = `このペースだと買い物は約${yen(c.projectedSpend)}で、上限を${yen(c.projectedSpend - c.limit)}超えそうです。1日あたり${yen(c.perDay)}までにすると収まります。`;
   } else {
-    advice = `このペースなら請求は約${yen(c.projected)}で、上限内に収まる見込みです。`;
+    advice = `このペースなら買い物は約${yen(c.projectedSpend)}で、上限内に収まる見込みです。`;
   }
+  if (c.entered && c.investment > 0) advice += `（利用額のうち積立${yen(c.investment)}は除いて計算しています）`;
   return `<section class="hero ${over ? 'is-over' : ''}">
       <p class="hero-label">カードであと ${helpBtn('card-usage', 'on-dark')}</p>
       <p class="hero-value">${over ? '0円' : yen(c.remaining)}</p>
@@ -157,7 +158,7 @@ function cardHero() {
       <div class="stat"><span class="stat-label">1日あたり</span><span class="stat-value">${yen(c.perDay)}</span></div>
       <div class="stat"><span class="stat-label">請求見込み</span><span class="stat-value">${c.projected == null ? '—' : yen(c.projected)}</span></div>
     </section>
-    <p class="advice ${over || c.projected > c.limit ? 'caution' : ''}">${advice}</p>`;
+    <p class="advice ${over || c.projectedSpend > c.limit ? 'caution' : ''}">${advice}</p>`;
 }
 
 /** カードの利用額の入力（カード会社のアプリで見た額をときどき入れる） */
@@ -186,7 +187,8 @@ function cardUsageCard() {
 function cardFlowRows(p, a) {
   const bill = cardBillIn(state.expenses, currentPeriod());
   if (!bill) return '';
-  return `<div><dt>カード代（${md(bill.date)}引き落とし）</dt><dd>−${yen(bill.amount)}</dd></div>
+  const inv = n(bill.investPart);
+  return `<div><dt>カード代（${md(bill.date)}引き落とし）${inv > 0 ? `<small>請求${yen(bill.amount)}のうち積立${yen(inv)}は上の積立投資で計算済み</small>` : ''}</dt><dd>−${yen(spendAmount(bill))}</dd></div>
     <div class="total"><dt>カード代を払ったあとに残るお金</dt><dd>${signed(a.monthLeft)}</dd></div>
     ${cardReviewText(bill) ? `<div class="review-row">${cardReviewText(bill)}</div>` : ''}`;
 }
@@ -229,7 +231,7 @@ export function expenseRow(e) {
   return `<li class="exp ${ui.editingId === e.id ? 'is-editing' : ''}">
     <button type="button" class="exp-body" data-action="edit-expense" data-id="${esc(e.id)}" aria-label="${yen(e.amount)}の支出を編集">
       <span class="exp-cat">${catLabel(e.category)}</span>
-      <span class="exp-main">${esc(e.shop) || '<span class="muted">（店名なし）</span>'}${e.memo ? `<small>${esc(e.memo)}</small>` : ''}</span>
+      <span class="exp-main">${esc(e.shop) || '<span class="muted">（店名なし）</span>'}${e.memo || n(e.investPart) > 0 ? `<small>${esc(e.memo)}${n(e.investPart) > 0 ? `（うち積立${yen(e.investPart)}）` : ''}</small>` : ''}</span>
       <span class="exp-amount">${yen(e.amount)}<small>${d.getMonth() + 1}/${d.getDate()}</small></span>
     </button>
     <button class="icon-btn" data-action="delete-expense" data-id="${esc(e.id)}" aria-label="${yen(e.amount)}の支出を削除">✕</button>

@@ -1,5 +1,5 @@
 import {
-  sum, toDateKey, parseDateKey, summarizeSpending, budgetPeriod, inPeriod, periodLabel, frequentEntries, parseMoney, yen,
+  sum, toDateKey, parseDateKey, summarizeSpending, budgetPeriod, inPeriod, periodLabel, frequentEntries, parseMoney, yen, spendAmount,
 } from '../calc.js';
 import { ds, state, ui, esc, catMap, groupOf, payday, currentPeriod, allow, currentRoute, render } from '../core.js';
 import { showToast, moneyValue, moneyAttrs } from '../ui.js';
@@ -72,7 +72,7 @@ export function ledgerView() {
       ${list.length ? Object.entries(byDate).map(([date, items]) => {
         const d = parseDateKey(date);
         const wd = '日月火水木金土'[d.getDay()];
-        return `<h3 class="date-head">${d.getMonth() + 1}月${d.getDate()}日（${wd}）<span>${yen(sum(items, (e) => e.amount))}</span></h3>
+        return `<h3 class="date-head">${d.getMonth() + 1}月${d.getDate()}日（${wd}）<span>${yen(sum(items, spendAmount))}</span></h3>
           <ul class="exp-list">${items.map(expenseRow).join('')}</ul>`;
       }).join('') : '<p class="muted">この期間の支出はまだありません。</p>'}
       <p class="note">固定費（家賃・光熱費など）は予算タブで設定した金額で自動計算されるため、ここでの記録は不要です。</p>

@@ -9,7 +9,7 @@ import {
   goalPlan, goalsMonthlyTotal, earmarkedSavings,
   bonusSchedule, bonusPayoutsBefore, bonusAllocation, bonusDueThisMonth, planAt, upsertPlanSnapshot,
   periodLeftover, goalsPaidIn, reminderCalendar, budgetPeriod as period, dayInPeriod, cardBillIn,
-  cardCycle, latestCardUsage, cardUsageStatus, cardBillReview,
+  cardCycle, latestCardUsage, cardUsageStatus, cardBillReview, spendAmount, summarizeSpending,
 } from '../public/js/calc.js';
 
 const groupOf = (id) => (['food', 'daily'].includes(id) ? 'living' : 'free');
@@ -569,4 +569,29 @@ test('請求額のふり返り：直前3回の平均と比べる', () => {
   assert.equal(cardBillReview(bills, { date: '2026-10-27', amount: 82000 }).level, 'same');
   assert.equal(cardBillReview([], { date: '2026-10-27', amount: 1 }), null);
   assert.equal(cardBillReview(bills, null), null);
+});
+
+/* ---------- 積立投資をカードで払う ---------- */
+
+test('カードの請求額に含まれる積立分は、支出として数えない', () => {
+  const bill = { date: '2026-10-27', category: 'card', amount: 120000, investPart: 30000, kind: 'cardBill' };
+  assert.equal(spendAmount(bill), 90000);
+  assert.equal(spendAmount({ amount: 20000, investPart: 30000 }), 0); // 積立より少なくてもマイナスにしない
+  assert.equal(spendAmount({ amount: 500 }), 500);
+  const s = summarizeSpending([bill, { category: 'food', amount: 1000 }], groupOf);
+  assert.deepEqual([s.free, s.living, s.total], [90000, 1000, 91000]);
+});
+
+test('カードの利用額：積立分を除いた買い物で上限と比べ、請求見込みには積立を含める', () => {
+  const t = new Date(2026, 9, 19);
+  const cycle = cardCycle(t, 31, 27);
+  const latest = { id: 'a', date: '2026-10-19', amount: 76000 };
+  const st = cardUsageStatus({ cycle, limit: 150000, latest, today: t, investment: 30000 });
+  assert.deepEqual([st.used, st.spent, st.remaining, st.projectedSpend, st.projected], [76000, 46000, 104000, 75053, 105053]);
+});
+
+test('請求額のふり返りは、積立分を除いた買い物の額で比べる', () => {
+  const bills = [{ date: '2026-09-27', amount: 110000, investPart: 30000 }];
+  const r = cardBillReview(bills, { date: '2026-10-27', amount: 118000, investPart: 30000 });
+  assert.deepEqual([r.avg, r.diff, r.level], [80000, 8000, 'up']);
 });
