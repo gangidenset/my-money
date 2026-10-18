@@ -75,6 +75,18 @@ export function budgetPeriod(today = new Date(), payday = 1, offset = 0) {
 
 export const inPeriod = (period, dateKey) => dateKey >= period.startKey && dateKey <= period.endKey;
 
+/** 期間の中で「毎月 day 日」にあたる日（その月に day 日がなければ月末）。クレジットカードの引き落とし日に使う */
+export function dayInPeriod(period, day) {
+  const want = Math.min(31, Math.max(1, Math.round(n(day)) || 1));
+  for (let d = period.start; d <= period.end; d = addDays(d, 1)) {
+    if (d.getDate() === Math.min(want, daysInMonth(d.getFullYear(), d.getMonth()))) return toDateKey(d);
+  }
+  return period.startKey;
+}
+
+/** 期間内のクレジットカードの請求額の記録（kind: 'cardBill' の支出） */
+export const cardBillIn = (expenses, period) => expenses.find((e) => e.kind === 'cardBill' && inPeriod(period, e.date)) ?? null;
+
 export function periodLabel(period) {
   if (period.payday === 1) return `${period.start.getFullYear()}年${period.start.getMonth() + 1}月`;
   const f = (d) => `${d.getMonth() + 1}月${d.getDate()}日`;

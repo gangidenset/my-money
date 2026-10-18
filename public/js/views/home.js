@@ -1,11 +1,12 @@
 import {
   n, parseDateKey, addDays, toDateKey, judgeSpend, budgetAlerts, householdHealth, backupReminder, parseMoney, formatMoneyText, yen,
-  periodLabel, goalPlan, bonusDueThisMonth,
+  periodLabel, goalPlan, bonusDueThisMonth, cardBillIn,
 } from '../calc.js';
 import {
   ds, state, ui, esc, catMap, catLabel, plan, basePlan, payday, allow, freeAlloc, visitsPerWeek, categoryUsage, render,
-  pendingSettlement, bonus, logGoal, unlogGoal,
+  pendingSettlement, bonus, logGoal, unlogGoal, currentPeriod,
 } from '../core.js';
+import { cardBillForm } from './budget.js';
 import { showToast, moneyAttrs, bar, signed } from '../ui.js';
 import { helpBtn } from '../guides.js';
 
@@ -182,7 +183,7 @@ export function backupBanner() {
 /* ---------- 今月のやること（先月の締め・ボーナス・目的別の積立・バックアップ） ---------- */
 
 export function todoCard() {
-  const items = [settlementItem(), bonusItem(), goalsItem(), backupBanner()].filter(Boolean);
+  const items = [settlementItem(), cardItem(), bonusItem(), goalsItem(), backupBanner()].filter(Boolean);
   if (!items.length) return '';
   return `<section class="card todo-card" aria-label="今月のやること">
     <h2>📌 今月のやること${helpBtn('todo')}</h2>
@@ -217,6 +218,15 @@ function settlementItem() {
       </div>` : ''}
       <button class="btn ghost" data-action="settle" data-kind="none">記録しない</button>
     </div>
+  </div>`;
+}
+
+/** クレジットカードの今月の請求額（まだ入れていないとき） */
+function cardItem() {
+  if (!state.profile.card?.enabled || cardBillIn(state.expenses, currentPeriod())) return '';
+  return `<div class="todo-item">
+    <p>💳 今月のクレジットカードの請求額を入れてください。</p>
+    ${cardBillForm()}
   </div>`;
 }
 

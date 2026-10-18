@@ -6,7 +6,7 @@ import { formatMoneyField } from './ui.js';
 import { hideTip } from './views/charts.js';
 import { homeView, homeActions } from './views/home.js';
 import { ledgerView, endEdit, saveExpense, addExpense, ledgerActions } from './views/ledger.js';
-import { summaryCard, suggestCard, allocCard, budgetView, goalResultHtml, goalsFoot, bonusCard, bonusBreakdown, budgetActions } from './views/budget.js';
+import { summaryCard, suggestCard, allocCard, budgetView, goalResultHtml, goalsFoot, bonusCard, bonusBreakdown, cardDateLabel, budgetActions } from './views/budget.js';
 import { simView, healthCard, goalResult, raiseResult, savingResult, nisaCheckHtml, simResult, simActions } from './views/sim.js';
 import { updateOnlineBadge, settingsView, settingsActions } from './views/settings.js';
 import { guideActions, openScreenGuide } from './guides.js';
@@ -81,6 +81,7 @@ function refreshLive() {
     }
   }
   document.querySelectorAll('.bonus-only').forEach((el) => (el.hidden = !bonus().active));
+  document.querySelectorAll('[data-live="card-date"]').forEach((el) => (el.textContent = cardDateLabel()));
 }
 
 function onBoundInput(t) {

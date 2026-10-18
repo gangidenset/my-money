@@ -1,9 +1,13 @@
 import { BUDGET_LABELS, EXTRA_FIXED_COSTS, uid } from '../dataService.js';
 import {
-  n, toDateKey, MAX_PAYDAY, ALLOC_CHOICES, suggestBudget, goalPlan, earmarkedSavings, bonusAllocation, bonusDueThisMonth, yen,
+  n, toDateKey, parseDateKey, parseMoney, MAX_PAYDAY, ALLOC_CHOICES, suggestBudget, goalPlan, earmarkedSavings, bonusAllocation, bonusDueThisMonth, yen,
+  dayInPeriod, cardBillIn,
 } from '../calc.js';
-import { ds, state, esc, catMap, plan, payday, history, freeAlloc, visitsPerWeek, render, flushSaves, bonus, logGoal, unlogGoal } from '../core.js';
-import { showToast, moneyInput, signed } from '../ui.js';
+import {
+  ds, state, esc, catMap, plan, payday, history, freeAlloc, visitsPerWeek, render, flushSaves, bonus, logGoal, unlogGoal,
+  currentPeriod,
+} from '../core.js';
+import { showToast, moneyInput, moneyValue, moneyAttrs, signed } from '../ui.js';
 import { helpBtn } from '../guides.js';
 
 /* ---------- 予算（収入・固定費・生活費・貯蓄） ---------- */
@@ -138,6 +142,8 @@ export function budgetView() {
       </div>
     </section>
 
+    ${cardSection()}
+
     <section class="card">
       <div class="card-head"><h2>生活費予算${helpBtn('living')}</h2><span class="muted">合計 <strong data-live="living">${yen(plan().living)}</strong></span></div>
       ${state.budgets.map((b, i) => moneyInput(`budgets.${i}.monthlyLimit`, b.monthlyLimit, BUDGET_LABELS[b.category] || catMap()[b.category]?.name || b.category, { hint: histHint(b.category) })).join('')}
@@ -256,6 +262,66 @@ export function goalsFoot() {
     <p class="note">購入したときの支払いは家計簿に記録せず、「購入済みにする」を押してください（現在の貯金額から、その目的の残高を差し引きます）。</p>`;
 }
 
+/* ---------- クレジットカード（請求額を月に1回入れる） ---------- */
+
+const cardSettings = () => ({ enabled: false, payDay: 27, ...(state.profile.card ?? {}) });
+
+/** 今の期間の引き落とし日（YYYY-MM-DD） */
+export const cardPayKey = () => dayInPeriod(currentPeriod(), cardSettings().payDay);
+
+export function cardDateLabel() {
+  const d = parseDateKey(cardPayKey());
+  return `${d.getMonth() + 1}月${d.getDate()}日 引き落とし`;
+}
+
+/** 今月の請求額の入力欄（予算タブとホームの「今月のやること」で共通） */
+export function cardBillForm() {
+  const bill = cardBillIn(state.expenses, currentPeriod());
+  return `<div class="card-bill-form">
+    <span class="field-label">今月の請求額<small data-live="card-date">${cardDateLabel()}</small></span>
+    <div class="card-bill-row">
+      <span class="money-input">
+        <input ${moneyAttrs} data-card-bill value="${bill ? moneyValue(bill.amount) : ''}" placeholder="0" aria-label="今月のクレジットカードの請求額">
+        <span class="unit">円</span>
+      </span>
+      <button type="button" class="btn primary" data-action="card-save-bill">${bill ? '更新' : '記録'}</button>
+    </div>
+    ${bill ? `<p class="note ok-text">✅ ${yen(bill.amount)}を記録済みです。</p>` : ''}
+  </div>`;
+}
+
+export function cardSection() {
+  const c = cardSettings();
+  if (!c.enabled) {
+    return `<section class="card" id="card-section">
+      <h2>💳 クレジットカード${helpBtn('card')}</h2>
+      <p class="note lead">買い物の多くをクレジットカードで払っている場合は、毎月の請求額（引き落とし額）を1回入れるだけで管理できます。</p>
+      <button type="button" class="btn block" data-action="card-enable">クレジットカードの請求額を管理する</button>
+    </section>`;
+  }
+  const bills = state.expenses.filter((e) => e.kind === 'cardBill').sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
+  const living = plan().living;
+  return `<section class="card" id="card-section">
+    <h2>💳 クレジットカード${helpBtn('card')}</h2>
+    <label class="field">
+      <span class="field-label">引き落とし日</span>
+      <select data-bind="profile.card.payDay" data-num>
+        ${Array.from({ length: 31 }, (_, k) => k + 1).map((d) => `<option value="${d}" ${n(c.payDay) === d ? 'selected' : ''}>${d === 31 ? '31日（月末）' : `${d}日`}</option>`).join('')}
+      </select>
+    </label>
+    ${cardBillForm()}
+    ${living > 0 ? `<p class="note caution">生活費予算（月${yen(living)}）も設定されています。食費などをカードで払っている場合は二重に差し引かれるので、生活費予算を0円にしてください。</p>
+      <button type="button" class="btn block" data-action="card-clear-living">生活費予算を0円にする</button>` : ''}
+    ${bills.length ? `<h3 class="sub-head">これまでの請求額</h3>
+      <ul class="plain-list">${bills.map((b) => {
+        const d = parseDateKey(b.date);
+        return `<li><span>${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日</span><strong>${yen(b.amount)}</strong></li>`;
+      }).join('')}</ul>` : ''}
+    <p class="note">請求額は引き落とし日の支出として家計簿に記録され、「自由に使えるお金」から差し引かれます。カードを複数使っている場合は合計を入れてください。</p>
+    <button type="button" class="btn ghost block" data-action="card-disable">カードの管理をやめる（記録は残ります）</button>
+  </section>`;
+}
+
 /* ---------- ボーナスの使い道（別管理のとき） ---------- */
 
 export function bonusCard() {
@@ -304,6 +370,61 @@ export async function saveGoalsAndRender(message, undo) {
 /* ---------- ボタン操作（data-action） ---------- */
 
 export const budgetActions = {
+  'card-enable': async (btn, ev) => {
+    flushSaves();
+    state.profile.card = { ...cardSettings(), enabled: true };
+    await ds.saveProfile(state.profile);
+    render();
+  },
+  'card-disable': async (btn, ev) => {
+    flushSaves();
+    state.profile.card = { ...cardSettings(), enabled: false };
+    await ds.saveProfile(state.profile);
+    render();
+  },
+  'card-save-bill': async (btn, ev) => {
+    const input = btn.closest('.card-bill-form')?.querySelector('[data-card-bill]');
+    const amount = parseMoney(input?.value);
+    if (amount <= 0) {
+      showToast('請求額を入れてください');
+      input?.focus();
+      return;
+    }
+    const existing = cardBillIn(state.expenses, currentPeriod());
+    let undo;
+    if (existing) {
+      const before = existing.amount;
+      const updated = await ds.updateExpense(existing.id, { amount, date: cardPayKey() });
+      state.expenses = state.expenses.map((x) => (x.id === updated.id ? updated : x));
+      undo = async () => {
+        const back = await ds.updateExpense(existing.id, { amount: before });
+        state.expenses = state.expenses.map((x) => (x.id === back.id ? back : x));
+      };
+    } else {
+      const item = await ds.addExpense({ date: cardPayKey(), amount, category: 'card', shop: 'クレジットカード', memo: '請求額', kind: 'cardBill' });
+      state.expenses.push(item);
+      undo = async () => {
+        await ds.deleteExpense(item.id);
+        state.expenses = state.expenses.filter((x) => x.id !== item.id);
+      };
+    }
+    render();
+    showToast(`カードの請求額${yen(amount)}を記録しました`, {
+      label: '取り消す',
+      run: async () => { await undo(); render(); showToast('取り消しました'); },
+    });
+  },
+  'card-clear-living': async (btn, ev) => {
+    flushSaves();
+    const before = state.budgets.map((b) => ({ ...b }));
+    state.budgets = state.budgets.map((b) => ({ ...b, monthlyLimit: 0 }));
+    await ds.saveBudgets(state.budgets);
+    render();
+    showToast('生活費予算を0円にしました', {
+      label: '元に戻す',
+      run: async () => { state.budgets = before; await ds.saveBudgets(state.budgets); render(); showToast('元に戻しました'); },
+    });
+  },
   'bonus-month': async (btn, ev) => {
     flushSaves();
     const m = Number(btn.dataset.m);

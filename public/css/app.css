@@ -641,3 +641,12 @@ input[data-money] { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .guide-link:hover, .guide-link:focus-visible { border-color: var(--primary); }
 .guide-sheet .guide-all { margin-top: 14px; }
+
+/* ---- クレジットカード ---- */
+.card-bill-form { margin-top: 4px; }
+.card-bill-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.card-bill-row .btn { min-width: 72px; }
+.todo-item .card-bill-form { margin-top: 10px; }
+.ok-text { color: var(--ok); }
+#card-section .plain-list li strong { font-variant-numeric: tabular-nums; }
+#card-section .btn.ghost { margin-top: 4px; }

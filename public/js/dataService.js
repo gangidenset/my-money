@@ -15,6 +15,8 @@ export const DEFAULT_CATEGORIES = [
   { id: 'social', name: '交際費', icon: '🍻', group: 'free' },
   { id: 'fun', name: '娯楽', icon: '🎬', group: 'free' },
   { id: 'other', name: 'その他', icon: '💰', group: 'free' },
+  // クレジットカードの請求額（月に1回、引き落とし日の支出として記録する）
+  { id: 'card', name: 'クレジットカード', icon: '💳', group: 'free' },
 ];
 
 export const DEFAULT_FIXED_COSTS = [
@@ -29,6 +31,8 @@ export const DEFAULT_FIXED_COSTS = [
 ];
 
 export const EXTRA_FIXED_COSTS = [
+  { category: 'other', name: '同居人への生活費' },
+  { category: 'car', name: '車の保険' },
   { category: 'housing', name: '住宅ローン' },
   { category: 'car', name: '車ローン' },
   { category: 'car', name: '駐車場' },
@@ -53,6 +57,7 @@ const DEFAULT_PROFILE = {
   bonusMonths: [6, 12], // ボーナスの支給月（別管理のとき）
   bonusPlan: { savings: 0 }, // ボーナス1回あたり、貯金に回す額（目的別へは各目的の bonusPerPayout）
   bonusReceived: [], // 受け取りを記録した月（YYYY-MM）
+  card: { enabled: false, payDay: 27 }, // クレジットカードの請求額を管理するか・引き落とし日（1〜31。月末を超える日は月末）
   otherIncome: 0,
   sideIncome: 0,
   currentSavings: 0,

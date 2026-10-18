@@ -8,7 +8,7 @@ import {
   periodHistory, niceScale, compactYen, parseMoney, formatMoneyText,
   goalPlan, goalsMonthlyTotal, earmarkedSavings,
   bonusSchedule, bonusPayoutsBefore, bonusAllocation, bonusDueThisMonth, planAt, upsertPlanSnapshot,
-  periodLeftover, goalsPaidIn, reminderCalendar, budgetPeriod as period,
+  periodLeftover, goalsPaidIn, reminderCalendar, budgetPeriod as period, dayInPeriod, cardBillIn,
 } from '../public/js/calc.js';
 
 const groupOf = (id) => (['food', 'daily'].includes(id) ? 'living' : 'free');
@@ -504,4 +504,25 @@ test('カレンダーのリマインダー：給料日の毎月・ボーナス�
   // 給料日を過ぎていれば翌月から
   assert.match(reminderCalendar({ payday: 10, today: today1014 }), /DTSTART:20261110T090000/);
   assert.doesNotMatch(reminderCalendar({ payday: 10, today: today1014 }), /BYMONTH=/);
+});
+
+/* ---------- クレジットカード ---------- */
+
+test('引き落とし日：期間の中の「毎月○日」、その月にない日は月末', () => {
+  assert.equal(dayInPeriod(period(new Date(2026, 9, 14), 1), 27), '2026-10-27');
+  assert.equal(dayInPeriod(period(new Date(2026, 9, 14), 25), 27), '2026-09-27'); // 9/25〜10/24 の期間
+  assert.equal(dayInPeriod(period(new Date(2026, 9, 14), 25), 10), '2026-10-10');
+  assert.equal(dayInPeriod(period(new Date(2027, 1, 10), 1), 31), '2027-02-28'); // 2月は月末
+  assert.equal(dayInPeriod(period(new Date(2026, 9, 14), 25), 31), '2026-09-30');
+});
+
+test('期間内のカードの請求額の記録を探す', () => {
+  const list = [
+    { id: 'a', date: '2026-09-27', kind: 'cardBill', amount: 80000 },
+    { id: 'b', date: '2026-10-27', kind: 'cardBill', amount: 90000 },
+    { id: 'c', date: '2026-10-05', category: 'card', amount: 1 }, // 請求額ではない記録
+  ];
+  assert.equal(cardBillIn(list, period(new Date(2026, 9, 14), 1)).id, 'b');
+  assert.equal(cardBillIn(list, period(new Date(2026, 8, 14), 1)).id, 'a');
+  assert.equal(cardBillIn(list, period(new Date(2026, 7, 14), 1)), null);
 });

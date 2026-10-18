@@ -14,7 +14,7 @@ export function ledgerView() {
   const list = state.expenses.filter((e) => inPeriod(period, e.date)).sort((x, y) => (y.date + y.id).localeCompare(x.date + x.id));
   const s = summarizeSpending(list, groupOf);
   const editing = ui.editingId ? state.expenses.find((e) => e.id === ui.editingId) : null;
-  ui.quickList = editing ? [] : frequentEntries(state.expenses);
+  ui.quickList = editing ? [] : frequentEntries(state.expenses.filter((e) => e.kind !== 'cardBill'));
 
   const byDate = {};
   list.forEach((e) => (byDate[e.date] ||= []).push(e));
