@@ -1,12 +1,13 @@
 import {
   n, parseDateKey, addDays, toDateKey, judgeSpend, budgetAlerts, householdHealth, backupReminder, parseMoney, formatMoneyText, yen,
-  periodLabel, goalPlan, bonusDueThisMonth, cardBillIn,
+  periodLabel, goalPlan, bonusDueThisMonth, cardBillIn, parseDateKey as parseKey,
 } from '../calc.js';
 import {
   ds, state, ui, esc, catMap, catLabel, plan, basePlan, payday, allow, freeAlloc, visitsPerWeek, categoryUsage, render,
-  pendingSettlement, bonus, logGoal, unlogGoal, currentPeriod,
+  pendingSettlement, bonus, logGoal, unlogGoal, currentPeriod, isCardMode, cardSettings, cardStatus,
 } from '../core.js';
-import { cardBillForm } from './budget.js';
+import { cardBillForm, cardReviewText } from './budget.js';
+import { uid } from '../dataService.js';
 import { showToast, moneyAttrs, bar, signed } from '../ui.js';
 import { helpBtn } from '../guides.js';
 
@@ -64,7 +65,7 @@ export function homeView() {
         <button type="button" class="btn ghost" data-action="dismiss-guide-intro">閉じる</button>
       </div>
     </section>`}
-    <section class="hero ${over ? 'is-over' : ''}">
+    ${isCardMode() ? cardHero() : `<section class="hero ${over ? 'is-over' : ''}">
       <p class="hero-label">今月あと ${helpBtn('remaining', 'on-dark')}</p>
       <p class="hero-value">${over ? '0円' : yen(a.monthLeft)}</p>
       <p class="hero-sub">${untilLabel}残り${a.daysLeft}日</p>
@@ -77,10 +78,11 @@ export function homeView() {
     </section>
 
     <p class="advice ${over ? 'caution' : ''}">${headline}</p>
-    ${alerts.length ? `<ul class="alerts">${alerts.map((x) => `<li class="${x.level}">${esc(x.message)}</li>`).join('')}</ul>` : ''}
+    ${alerts.length ? `<ul class="alerts">${alerts.map((x) => `<li class="${x.level}">${esc(x.message)}</li>`).join('')}</ul>` : ''}`}
     ${todoCard()}
+    ${cardSettings().enabled ? cardUsageCard() : ''}
 
-    <section class="card">
+    ${isCardMode() ? '' : `<section class="card">
       <h2>この出費、大丈夫？${helpBtn('check')}</h2>
       <span class="money-input">
         <input ${moneyAttrs} id="check-amount" value="${esc(formatMoneyText(ui.checkAmount))}" placeholder="使いたい金額">
@@ -89,38 +91,104 @@ export function homeView() {
       <p class="check-result ${check ? check.level : ''}" id="check-result">${check ? esc(check.message) : '金額を入れると、今週・今月の予算で判定します。'}</p>
     </section>
 
-    ${allocHomeCard(usage)}
+    ${allocHomeCard(usage)}`}
 
     <section class="card">
       <h2>今月のお金の流れ${helpBtn('flow')}</h2>
       <dl class="flow">
         <div><dt>収入</dt><dd>${yen(p.income)}</dd></div>
         <div><dt>固定費</dt><dd>−${yen(p.fixed)}</dd></div>
-        <div><dt>生活費予算</dt><dd>−${yen(p.living)}</dd></div>
+        ${isCardMode() && p.living === 0 ? '' : `<div><dt>生活費予算</dt><dd>−${yen(p.living)}</dd></div>`}
         <div><dt>貯蓄予定</dt><dd>−${yen(p.savings)}</dd></div>
         ${p.investment > 0 ? `<div><dt>積立投資</dt><dd>−${yen(p.investment)}</dd></div>` : ''}
         ${p.goals > 0 ? `<div><dt>目的別の積立</dt><dd>−${yen(p.goals)}</dd></div>` : ''}
         ${p.carry ? `<div><dt>先月からの繰り越し</dt><dd>${p.carry > 0 ? '+' : '−'}${yen(Math.abs(p.carry))}</dd></div>` : ''}
         <div class="total"><dt>自由に使えるお金</dt><dd>${signed(p.free)}</dd></div>
+        ${cardSettings().enabled ? cardFlowRows(p, a) : ''}
       </dl>
       ${p.free < 0 ? `<p class="note caution">固定費・生活費・貯蓄${p.goals > 0 ? "・目的別の積立" : ""}の合計が収入を${yen(-p.free)}上回っています。予算タブで見直してみましょう。</p>` : ''}
       ${healthChip()}
     </section>
 
-    <section class="card">
+    ${isCardMode() ? '' : `<section class="card">
       <h2>今月の予算消化${helpBtn('progress')}</h2>
       <div class="meter-row"><div class="meter-head"><span>生活費</span><span>${yen(s.living)} / ${yen(p.living)}</span></div>${bar(s.living, p.living)}</div>
       <div class="meter-row"><div class="meter-head"><span>自由に使えるお金</span><span>${yen(a.monthUsed)} / ${yen(Math.max(0, p.free))}</span></div>${bar(a.monthUsed, Math.max(0, p.free))}</div>
       ${livingRows ? `<details><summary>生活費の内訳</summary>${livingRows}</details>` : ''}
       ${a.dayOfMonth >= 5 && s.total > 0 ? `<p class="note">このペースだと${endWord}までの支出は約${yen(a.projectedSpend)}、${a.projectedLeft >= 0 ? `予算が約${yen(a.projectedLeft)}残る見込みです。` : `予算を約${yen(-a.projectedLeft)}超える見込みです。1日あたり${yen(-a.projectedLeft / a.daysLeft)}抑えると予定内に収まります。`}</p>` : ''}
-    </section>
+    </section>`}
 
-    <section class="card">
+    ${isCardMode() ? '' : `<section class="card">
       <div class="card-head"><h2>最近の支出${helpBtn('edit')}</h2><a href="#/ledger">家計簿へ</a></div>
       ${recent.length ? `<ul class="exp-list">${recent.map(expenseRow).join('')}</ul>` : '<p class="muted">まだ支出がありません。</p>'}
     </section>
 
-    <a class="fab" href="#/ledger" aria-label="支出を記録">＋</a>`;
+    <a class="fab" href="#/ledger" aria-label="支出を記録">＋</a>`}`;
+}
+
+/* ---------- クレジットカード（利用額・あといくら） ---------- */
+
+const md = (key) => {
+  const d = parseKey(key);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+};
+
+/** カード中心の表示のヒーロー：カードであといくら使えるか */
+function cardHero() {
+  const c = cardStatus();
+  const over = c.remaining < 0;
+  let advice;
+  if (!c.entered) {
+    advice = 'カード会社のアプリやサイトで今月の利用額を見て、下の「カードの利用額」に入れてください。';
+  } else if (over) {
+    advice = `上限を${yen(-c.remaining)}超えています。次の請求（${md(c.cycle.payKey)}）が多くなるので、締め日まではできるだけカードを使わないようにしましょう。`;
+  } else if (c.projected > c.limit) {
+    advice = `このペースだと請求は約${yen(c.projected)}で、上限を${yen(c.projected - c.limit)}超えそうです。1日あたり${yen(c.perDay)}までにすると収まります。`;
+  } else {
+    advice = `このペースなら請求は約${yen(c.projected)}で、上限内に収まる見込みです。`;
+  }
+  return `<section class="hero ${over ? 'is-over' : ''}">
+      <p class="hero-label">カードであと ${helpBtn('card-usage', 'on-dark')}</p>
+      <p class="hero-value">${over ? '0円' : yen(c.remaining)}</p>
+      <p class="hero-sub">締め日（${md(c.cycle.endKey)}）まで残り${c.daysLeft}日・上限${yen(c.limit)}</p>
+    </section>
+    <section class="stat-grid">
+      <div class="stat"><span class="stat-label">今の利用額</span><span class="stat-value">${c.entered ? yen(c.used) : '—'}</span></div>
+      <div class="stat"><span class="stat-label">1日あたり</span><span class="stat-value">${yen(c.perDay)}</span></div>
+      <div class="stat"><span class="stat-label">請求見込み</span><span class="stat-value">${c.projected == null ? '—' : yen(c.projected)}</span></div>
+    </section>
+    <p class="advice ${over || c.projected > c.limit ? 'caution' : ''}">${advice}</p>`;
+}
+
+/** カードの利用額の入力（カード会社のアプリで見た額をときどき入れる） */
+function cardUsageCard() {
+  const c = cardStatus();
+  const latest = c.latest;
+  return `<section class="card" id="card-usage-card">
+    <h2>💳 カードの利用額${helpBtn('card-usage')}</h2>
+    <p class="note lead">${md(c.cycle.startKey)}〜${md(c.cycle.endKey)}の利用分（${md(c.cycle.payKey)}に引き落とし）</p>
+    ${isCardMode() ? '' : `<div class="meter-row">
+      <div class="meter-head"><span>上限 ${yen(c.limit)}</span><span>${c.entered ? `あと${yen(Math.max(0, c.remaining))}` : '未入力'}</span></div>
+      ${bar(c.used, c.limit)}
+    </div>`}
+    <div class="card-bill-row">
+      <span class="money-input">
+        <input ${moneyAttrs} data-card-usage placeholder="${latest ? Math.round(latest.amount).toLocaleString('ja-JP') : '今の利用額'}" aria-label="今のカードの利用額">
+        <span class="unit">円</span>
+      </span>
+      <button type="button" class="btn primary" data-action="card-save-usage">更新</button>
+    </div>
+    <p class="note">${latest ? `最後に入れた日：${md(latest.date)}（${yen(latest.amount)}）` : 'カード会社のアプリやサイトの「ご利用金額（今月の利用額）」を入れてください。'}</p>
+  </section>`;
+}
+
+/** お金の流れの下に、今月のカード代と、払ったあとに残るお金 */
+function cardFlowRows(p, a) {
+  const bill = cardBillIn(state.expenses, currentPeriod());
+  if (!bill) return '';
+  return `<div><dt>カード代（${md(bill.date)}引き落とし）</dt><dd>−${yen(bill.amount)}</dd></div>
+    <div class="total"><dt>カード代を払ったあとに残るお金</dt><dd>${signed(a.monthLeft)}</dd></div>
+    ${cardReviewText(bill) ? `<div class="review-row">${cardReviewText(bill)}</div>` : ''}`;
 }
 
 export function allocHomeCard(usage) {
@@ -260,6 +328,26 @@ function goalsItem() {
 /* ---------- ボタン操作（data-action） ---------- */
 
 export const homeActions = {
+  'card-save-usage': async (btn, ev) => {
+    const input = btn.closest('#card-usage-card')?.querySelector('[data-card-usage]');
+    if (!input || input.value.trim() === '') {
+      showToast('今の利用額を入れてください');
+      input?.focus();
+      return;
+    }
+    const amount = parseMoney(input.value);
+    const today = toDateKey(new Date());
+    const before = state.cardUsage;
+    // 同じ日に入れ直したら上書きする（記録は直近200件まで）
+    state.cardUsage = [...state.cardUsage.filter((u) => u.date !== today), { id: uid(), date: today, amount }].slice(-200);
+    await ds.saveCardUsage(state.cardUsage);
+    render();
+    const c = cardStatus();
+    showToast(`利用額${yen(amount)}を記録。カードであと${yen(Math.max(0, c.remaining))}`, {
+      label: '取り消す',
+      run: async () => { state.cardUsage = before; await ds.saveCardUsage(state.cardUsage); render(); showToast('取り消しました'); },
+    });
+  },
   'dismiss-guide-intro': async (btn, ev) => {
     state.meta.guideIntroSeen = true;
     await ds.saveMeta(state.meta);

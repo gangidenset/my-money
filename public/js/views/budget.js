@@ -1,11 +1,11 @@
 import { BUDGET_LABELS, EXTRA_FIXED_COSTS, uid } from '../dataService.js';
 import {
   n, toDateKey, parseDateKey, parseMoney, MAX_PAYDAY, ALLOC_CHOICES, suggestBudget, goalPlan, earmarkedSavings, bonusAllocation, bonusDueThisMonth, yen,
-  dayInPeriod, cardBillIn,
+  dayInPeriod, cardBillIn, cardBillReview, addDays, latestCardUsage,
 } from '../calc.js';
 import {
   ds, state, esc, catMap, plan, payday, history, freeAlloc, visitsPerWeek, render, flushSaves, bonus, logGoal, unlogGoal,
-  currentPeriod,
+  currentPeriod, cardSettings, isCardMode, cardCycleNow, basePlan,
 } from '../core.js';
 import { showToast, moneyInput, moneyValue, moneyAttrs, signed } from '../ui.js';
 import { helpBtn } from '../guides.js';
@@ -98,7 +98,7 @@ export function budgetView() {
   const histHint = (id) => (hist?.byCategory[id] != null ? `過去${hist.months}か月平均 ${yen(hist.byCategory[id])}` : '');
   return `
     ${summaryCard()}
-    <div id="suggest-slot">${suggestCard()}</div>
+    ${isCardMode() ? '' : `<div id="suggest-slot">${suggestCard()}</div>`}
 
     <section class="card">
       <h2>収入${helpBtn('income')}</h2>
@@ -144,13 +144,13 @@ export function budgetView() {
 
     ${cardSection()}
 
-    <section class="card">
+    ${isCardMode() ? '' : `<section class="card">
       <div class="card-head"><h2>生活費予算${helpBtn('living')}</h2><span class="muted">合計 <strong data-live="living">${yen(plan().living)}</strong></span></div>
       ${state.budgets.map((b, i) => moneyInput(`budgets.${i}.monthlyLimit`, b.monthlyLimit, BUDGET_LABELS[b.category] || catMap()[b.category]?.name || b.category, { hint: histHint(b.category) })).join('')}
       <p class="note">外食・趣味・衣服などは下の「自由に使えるお金の使い道」で配分します。</p>
     </section>
 
-    ${allocCard()}
+    ${allocCard()}`}
 
     <section class="card">
       <h2>貯蓄${helpBtn('savings')}</h2>
@@ -264,8 +264,6 @@ export function goalsFoot() {
 
 /* ---------- クレジットカード（請求額を月に1回入れる） ---------- */
 
-const cardSettings = () => ({ enabled: false, payDay: 27, ...(state.profile.card ?? {}) });
-
 /** 今の期間の引き落とし日（YYYY-MM-DD） */
 export const cardPayKey = () => dayInPeriod(currentPeriod(), cardSettings().payDay);
 
@@ -275,8 +273,21 @@ export function cardDateLabel() {
 }
 
 /** 今月の請求額の入力欄（予算タブとホームの「今月のやること」で共通） */
+/** 請求額のふり返り（直前3回の平均と比べた一言） */
+export function cardReviewText(bill) {
+  const r = cardBillReview(state.expenses.filter((e) => e.kind === 'cardBill'), bill);
+  if (!r) return '';
+  const avg = `過去${r.count}回の平均（${yen(r.avg)}）`;
+  if (r.level === 'up') return `<p class="card-review up">📈 ${avg}より<strong>${yen(r.diff)}</strong>（${Math.round(r.pct * 100)}%）多くなっています。今月のカードの使い方を少し控えめにすると安心です。</p>`;
+  if (r.level === 'down') return `<p class="card-review down">📉 ${avg}より<strong>${yen(-r.diff)}</strong>少なく済みました。</p>`;
+  return `<p class="card-review">${avg}とほぼ同じです。</p>`;
+}
+
 export function cardBillForm() {
   const bill = cardBillIn(state.expenses, currentPeriod());
+  // 請求額のめやす：この引き落としの元になるサイクル（前のサイクル）で最後に入れた利用額
+  const prevCycle = cardCycleNow(addDays(cardCycleNow().start, -1));
+  const prevUsage = latestCardUsage(state.cardUsage, prevCycle);
   return `<div class="card-bill-form">
     <span class="field-label">今月の請求額<small data-live="card-date">${cardDateLabel()}</small></span>
     <div class="card-bill-row">
@@ -286,7 +297,8 @@ export function cardBillForm() {
       </span>
       <button type="button" class="btn primary" data-action="card-save-bill">${bill ? '更新' : '記録'}</button>
     </div>
-    ${bill ? `<p class="note ok-text">✅ ${yen(bill.amount)}を記録済みです。</p>` : ''}
+    ${bill ? `<p class="note ok-text">✅ ${yen(bill.amount)}を記録済みです。</p>${cardReviewText(bill)}`
+      : prevUsage ? `<p class="note">前のサイクルで最後に入れた利用額は${yen(prevUsage.amount)}です。</p>` : ''}
   </div>`;
 }
 
@@ -303,12 +315,21 @@ export function cardSection() {
   const living = plan().living;
   return `<section class="card" id="card-section">
     <h2>💳 クレジットカード${helpBtn('card')}</h2>
-    <label class="field">
-      <span class="field-label">引き落とし日</span>
-      <select data-bind="profile.card.payDay" data-num>
-        ${Array.from({ length: 31 }, (_, k) => k + 1).map((d) => `<option value="${d}" ${n(c.payDay) === d ? 'selected' : ''}>${d === 31 ? '31日（月末）' : `${d}日`}</option>`).join('')}
-      </select>
-    </label>
+    <div class="field-pair">
+      <label class="field">
+        <span class="field-label">締め日</span>
+        <select data-bind="profile.card.closingDay" data-num>
+          ${Array.from({ length: 31 }, (_, k) => k + 1).map((d) => `<option value="${d}" ${n(c.closingDay) === d ? 'selected' : ''}>${d === 31 ? '月末' : `${d}日`}</option>`).join('')}
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">引き落とし日<small>翌月</small></span>
+        <select data-bind="profile.card.payDay" data-num>
+          ${Array.from({ length: 31 }, (_, k) => k + 1).map((d) => `<option value="${d}" ${n(c.payDay) === d ? 'selected' : ''}>${d === 31 ? '月末' : `${d}日`}</option>`).join('')}
+        </select>
+      </label>
+    </div>
+    ${moneyInput('profile.card.budget', c.budget, '1か月にカードで使う上限', { hint: `0なら「自由に使えるお金」（今は<span data-live="card-auto-limit">${yen(Math.max(0, basePlan().free))}</span>）` })}
     ${cardBillForm()}
     ${living > 0 ? `<p class="note caution">生活費予算（月${yen(living)}）も設定されています。食費などをカードで払っている場合は二重に差し引かれるので、生活費予算を0円にしてください。</p>
       <button type="button" class="btn block" data-action="card-clear-living">生活費予算を0円にする</button>` : ''}

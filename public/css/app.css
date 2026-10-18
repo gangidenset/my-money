@@ -650,3 +650,11 @@ input[data-money] { text-align: right; font-variant-numeric: tabular-nums; }
 .ok-text { color: var(--ok); }
 #card-section .plain-list li strong { font-variant-numeric: tabular-nums; }
 #card-section .btn.ghost { margin-top: 4px; }
+
+/* ---- カード中心の表示・利用額・ふり返り ---- */
+.card-review { margin: 8px 0 0; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); font-size: 0.85rem; }
+.card-review.up { background: var(--caution-soft); }
+.card-review.down { background: var(--primary-soft); }
+.flow .review-row { display: block; }
+#card-usage-card .meter-row { margin: 4px 0 10px; }
+#card-usage-card .card-bill-row { margin-top: 4px; }

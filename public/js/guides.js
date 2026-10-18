@@ -1,7 +1,7 @@
 // 使い方ガイド：各機能の「？」ボタンと、画面右上の「？」（その画面の機能一覧）から開く。
 // 文章は guideContent.js に書く（画面のコードには helpBtn('id') を置くだけ）。
 
-import { GUIDES, SCREEN_GUIDES } from './guideContent.js';
+import { GUIDES, SCREEN_GUIDES, CARD_MODE_HIDDEN } from './guideContent.js';
 
 export { GUIDES, SCREEN_GUIDES };
 
@@ -49,8 +49,11 @@ function renderGuide(id) {
     ${g.related?.length ? `<h3>関連する機能</h3><div class="guide-links">${g.related.map(guideLink).join('')}</div>` : ''}`));
 }
 
+let hiddenGuides = [];
+
 function renderScreen(route) {
-  const s = SCREEN_GUIDES[route] ?? SCREEN_GUIDES.home;
+  const base = SCREEN_GUIDES[route] ?? SCREEN_GUIDES.home;
+  const s = { ...base, guides: base.guides.filter((id) => !hiddenGuides.includes(id)) };
   current = { type: 'screen', id: route };
   show(sheetHtml(s.title, `
     <p class="guide-summary">${s.intro}</p>
@@ -74,7 +77,9 @@ export function openGuide(id, { fromSheet = false } = {}) {
   else backStack.length = 0;
   renderGuide(id);
 }
-export function openScreenGuide(route) {
+/** その画面の使い方の一覧。cardMode のときは隠している機能を一覧から外す */
+export function openScreenGuide(route, { cardMode = false } = {}) {
+  hiddenGuides = cardMode ? CARD_MODE_HIDDEN : [];
   backStack.length = 0;
   renderScreen(route);
 }

@@ -57,7 +57,9 @@ const DEFAULT_PROFILE = {
   bonusMonths: [6, 12], // ボーナスの支給月（別管理のとき）
   bonusPlan: { savings: 0 }, // ボーナス1回あたり、貯金に回す額（目的別へは各目的の bonusPerPayout）
   bonusReceived: [], // 受け取りを記録した月（YYYY-MM）
-  card: { enabled: false, payDay: 27 }, // クレジットカードの請求額を管理するか・引き落とし日（1〜31。月末を超える日は月末）
+  // クレジットカード：管理するか・引き落とし日・締め日（1〜31。月末を超える日は月末）・1か月に使う上限（0 = 自由に使えるお金）
+  card: { enabled: false, payDay: 27, closingDay: 31, budget: 0 },
+  display: { mode: 'standard' }, // 表示モード：'standard'（すべての機能）/ 'card'（カード中心のシンプル表示）
   otherIncome: 0,
   sideIncome: 0,
   currentSavings: 0,
@@ -92,6 +94,7 @@ export const DATA_KEYS = [
   'planHistory', // 収入・固定費などの設定の履歴（設定を変えた期間から反映）
   'settlements', // 期間の締め（余ったお金・足りなかったお金をどうしたか）
   'goalLog', // 目的別の貯金に入れた記録（毎月の積立・ボーナス・繰り越し）
+  'cardUsage', // クレジットカードの利用額（カード会社のアプリで見た額をときどき記録）
 ];
 
 const toInt = (v) => {
@@ -276,6 +279,9 @@ export function createDataService(storage) {
 
     getSettlements: () => read('settlements', {}),
     saveSettlements: (map) => storage.set('settlements', map),
+
+    listCardUsage: () => read('cardUsage', []),
+    saveCardUsage: (list) => storage.set('cardUsage', list),
 
     listGoalLog: () => read('goalLog', []),
     saveGoalLog: (list) => storage.set('goalLog', list),

@@ -3,6 +3,7 @@ import { createDataService, uid } from './dataService.js';
 import {
   n, toDateKey, monthlyPlan, budgetPeriod, inPeriod, allowance, allocate, weekStartKey, historyAverages, earmarkedSavings,
   bonusSchedule, planAt, upsertPlanSnapshot, periodLeftover, goalsPaidIn,
+  cardCycle, latestCardUsage, cardUsageStatus,
 } from './calc.js';
 
 // アプリ全体で共有する状態・データの読み書き・描画の呼び出し口
@@ -18,6 +19,7 @@ export const state = {
   planHistory: [], // 収入・固定費などの設定の履歴
   settlements: {}, // 期間の締め（期間の初日 → どうしたか）
   goalLog: [], // 目的別の貯金に入れた記録
+  cardUsage: [], // クレジットカードの利用額の記録
 };
 export const ui = {
   entryCategory: 'food',
@@ -37,6 +39,27 @@ export const catLabel = (id) => {
   const c = catMap()[id];
   return c ? `${c.icon} ${esc(c.name)}` : '❔ 不明';
 };
+/* ---------- 表示モード・クレジットカード ---------- */
+
+/** カード中心のシンプル表示か（使わない機能を隠す） */
+export const isCardMode = () => state.profile?.display?.mode === 'card';
+
+/** クレジットカードの設定（古いデータで項目が足りない場合も初期値で補う） */
+export const cardSettings = () => ({ enabled: false, payDay: 27, closingDay: 31, budget: 0, ...(state.profile?.card ?? {}) });
+
+/** 今日を含むカードの利用サイクル */
+export const cardCycleNow = (today = new Date()) => cardCycle(today, cardSettings().closingDay, cardSettings().payDay);
+
+/** カードで1サイクルに使ってよい額（自分で決めていなければ、毎月の「自由に使えるお金」） */
+export const cardLimit = () => (n(cardSettings().budget) > 0 ? n(cardSettings().budget) : Math.max(0, basePlan().free));
+
+/** カードの今サイクルの状況（利用額・あと使える額・請求見込み） */
+export function cardStatus(today = new Date()) {
+  const cycle = cardCycleNow(today);
+  const latest = latestCardUsage(state.cardUsage, cycle);
+  return { cycle, latest, ...cardUsageStatus({ cycle, limit: cardLimit(), latest, today }) };
+}
+
 /** ボーナスの予定（「別管理」のときの使い道） */
 export const bonus = () => bonusSchedule(state.profile);
 /** 今の設定による毎月の計画（前の期間からの繰り越しを含まない） */
@@ -132,10 +155,10 @@ export async function prepareData() {
 export async function loadAll() {
   [
     state.profile, state.fixedCosts, state.budgets, state.simulation, state.goal, state.goals, state.allocations,
-    state.categories, state.expenses, state.meta, state.planHistory, state.settlements, state.goalLog,
+    state.categories, state.expenses, state.meta, state.planHistory, state.settlements, state.goalLog, state.cardUsage,
   ] = await Promise.all([
     ds.getProfile(), ds.listFixedCosts(), ds.listBudgets(), ds.getSimulation(), ds.getGoal(), ds.listGoals(), ds.getAllocations(),
-    ds.listCategories(), ds.listExpenses(), ds.getMeta(), ds.listPlanHistory(), ds.getSettlements(), ds.listGoalLog(),
+    ds.listCategories(), ds.listExpenses(), ds.getMeta(), ds.listPlanHistory(), ds.getSettlements(), ds.listGoalLog(), ds.listCardUsage(),
   ]);
   if (!state.meta.firstUsedAt) {
     state.meta.firstUsedAt = new Date().toISOString();

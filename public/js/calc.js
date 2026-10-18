@@ -84,6 +84,66 @@ export function dayInPeriod(period, day) {
   return period.startKey;
 }
 
+/* ---------- クレジットカードの利用額（締め日で区切った1サイクル） ---------- */
+
+const closeDateOf = (y, m0, day) => new Date(y, m0, Math.min(day, daysInMonth(y, m0)));
+
+/**
+ * 今日を含むカードの利用サイクル。closingDay 日締め（31 なら月末締め）で、
+ * 前回の締め日の翌日〜次の締め日。請求は締め日の翌月の payDay 日（ない月は月末）。
+ */
+export function cardCycle(today = new Date(), closingDay = 31, payDay = 27) {
+  const c = Math.min(31, Math.max(1, Math.round(n(closingDay)) || 31));
+  const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  let end = closeDateOf(t.getFullYear(), t.getMonth(), c);
+  if (t > end) end = closeDateOf(t.getFullYear(), t.getMonth() + 1, c);
+  const prevClose = closeDateOf(end.getFullYear(), end.getMonth() - 1, c);
+  const start = addDays(prevClose, 1);
+  const payDate = closeDateOf(end.getFullYear(), end.getMonth() + 1, Math.min(31, Math.max(1, Math.round(n(payDay)) || 27)));
+  return {
+    start, end, startKey: toDateKey(start), endKey: toDateKey(end),
+    days: diffDays(start, end) + 1, payKey: toDateKey(payDate),
+  };
+}
+
+/** そのサイクルで最後に入れた利用額の記録（なければ null） */
+export function latestCardUsage(usage, cycle) {
+  const inCycle = usage.filter((u) => u.date >= cycle.startKey && u.date <= cycle.endKey);
+  return inCycle.sort((a, b) => a.date.localeCompare(b.date) || String(a.id).localeCompare(String(b.id))).at(-1) ?? null;
+}
+
+/**
+ * カードで今サイクルあといくら使えるか。
+ * used：最後に入れた利用額、projected：入れた日までのペースが締め日まで続いた場合の請求見込み。
+ */
+export function cardUsageStatus({ cycle, limit, latest, today = new Date() }) {
+  const used = latest ? n(latest.amount) : 0;
+  const asOf = latest ? parseDateKey(latest.date) : today;
+  const elapsed = Math.max(1, diffDays(cycle.start, asOf) + 1);
+  const daysLeft = Math.max(1, diffDays(today, cycle.end) + 1);
+  const remaining = n(limit) - used;
+  return {
+    used, limit: n(limit), remaining, daysLeft,
+    perDay: Math.max(0, remaining) / daysLeft,
+    projected: latest ? Math.round((used / elapsed) * cycle.days) : null,
+    entered: Boolean(latest),
+  };
+}
+
+/**
+ * 請求額のふり返り：今回の請求額を、それより前の直近3回の平均と比べる。
+ * level：'up'（10%以上多い）/ 'down'（10%以上少ない）/ 'same'。比べる記録がなければ null
+ */
+export function cardBillReview(bills, current) {
+  if (!current) return null;
+  const before = bills.filter((b) => b.date < current.date).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
+  if (!before.length) return null;
+  const avg = sum(before, (b) => b.amount) / before.length;
+  const diff = n(current.amount) - avg;
+  const pct = avg > 0 ? diff / avg : 0;
+  return { avg, diff, pct, count: before.length, level: pct >= 0.1 ? 'up' : pct <= -0.1 ? 'down' : 'same' };
+}
+
 /** 期間内のクレジットカードの請求額の記録（kind: 'cardBill' の支出） */
 export const cardBillIn = (expenses, period) => expenses.find((e) => e.kind === 'cardBill' && inPeriod(period, e.date)) ?? null;
 

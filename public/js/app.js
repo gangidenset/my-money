@@ -1,7 +1,7 @@
 import {
   n, judgeSpend, parseMoney, yen,
 } from './calc.js';
-import { ds, state, ui, $main, plan, allow, freeAlloc, visitsPerWeek, loadAll, prepareData, currentRoute, setRenderer, render, schedulePersist, flushSaves, setByPath, bonus, recordPlanSnapshot } from './core.js';
+import { ds, state, ui, $main, plan, allow, freeAlloc, visitsPerWeek, loadAll, prepareData, currentRoute, setRenderer, render, schedulePersist, flushSaves, setByPath, bonus, recordPlanSnapshot, isCardMode, basePlan } from './core.js';
 import { formatMoneyField } from './ui.js';
 import { hideTip } from './views/charts.js';
 import { homeView, homeActions } from './views/home.js';
@@ -82,6 +82,7 @@ function refreshLive() {
   }
   document.querySelectorAll('.bonus-only').forEach((el) => (el.hidden = !bonus().active));
   document.querySelectorAll('[data-live="card-date"]').forEach((el) => (el.textContent = cardDateLabel()));
+  document.querySelectorAll('[data-live="card-auto-limit"]').forEach((el) => (el.textContent = yen(Math.max(0, basePlan().free))));
 }
 
 function onBoundInput(t) {
@@ -143,7 +144,7 @@ $main.addEventListener('keydown', (ev) => {
 const actions = { ...homeActions, ...ledgerActions, ...budgetActions, ...simActions, ...settingsActions, ...guideActions };
 
 // 画面右上の「？」：いま開いている画面の使い方
-document.getElementById('topbar-help').addEventListener('click', () => openScreenGuide(currentRoute()));
+document.getElementById('topbar-help').addEventListener('click', () => openScreenGuide(currentRoute(), { cardMode: isCardMode() }));
 
 $main.addEventListener('click', async (ev) => {
   const btn = ev.target.closest('[data-action]');

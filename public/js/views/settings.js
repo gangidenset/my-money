@@ -1,7 +1,7 @@
 import {
   toDateKey, reminderCalendar,
 } from '../calc.js';
-import { persistent, ds, state, ui, esc, catMap, loadAll, render, payday, bonus } from '../core.js';
+import { persistent, ds, state, ui, esc, catMap, loadAll, render, payday, bonus, isCardMode, cardSettings, flushSaves } from '../core.js';
 import { showToast } from '../ui.js';
 import { helpBtn } from '../guides.js';
 
@@ -9,7 +9,7 @@ import { helpBtn } from '../guides.js';
 
 /* ---------- PWA（ホーム画面に追加・オフライン） ---------- */
 
-export const APP_VERSION = '1.6.0';
+export const APP_VERSION = '1.7.0';
 export let installPrompt = null;
 export const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 export const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -106,6 +106,17 @@ export function settingsView() {
       </div>
     </section>
 
+    <section class="card" id="mode-card">
+      <h2>🧭 表示モード${helpBtn('display-mode')}</h2>
+      <div class="segmented" role="radiogroup" aria-label="表示モード">
+        <button type="button" role="radio" data-action="set-mode" data-mode="standard" class="${isCardMode() ? '' : 'selected'}" aria-checked="${!isCardMode()}">すべての機能</button>
+        <button type="button" role="radio" data-action="set-mode" data-mode="card" class="${isCardMode() ? 'selected' : ''}" aria-checked="${isCardMode()}">カード中心</button>
+      </div>
+      <p class="note">${isCardMode()
+        ? 'カード払い中心の表示です。ホームは「カードであといくら使えるか」を中心にし、生活費予算・使い道の割合などは隠しています。'
+        : '「カード中心」にすると、出費がほぼクレジットカードの人向けに、使わない機能を隠したシンプルな画面になります。'}</p>
+    </section>
+
     ${installCard()}
 
     <section class="card" id="reminder-card">
@@ -115,7 +126,7 @@ export function settingsView() {
       <p class="note">アプリを閉じていても届くよう、スマホのカレンダーの通知を使います（家計のデータを外部のサーバーに送らないため、アプリからの通知はしていません）。給料日やボーナス月を変えたら、もう一度登録し直してください。</p>
     </section>
 
-    <section class="card">
+    ${isCardMode() ? '' : `<section class="card">
       <h2>カテゴリを追加${helpBtn('category')}</h2>
       <div class="cat-form">
         <input type="text" id="cat-icon" placeholder="🐶" maxlength="2" aria-label="絵文字">
@@ -127,7 +138,7 @@ export function settingsView() {
       </div>
       <button class="btn block" data-action="add-category">追加する</button>
       ${custom.length ? `<ul class="plain-list">${custom.map((c) => `<li><span>${c.icon} ${esc(c.name)} <small class="muted">${c.group === 'living' ? '生活費' : '自由費'}</small></span><button class="icon-btn" data-action="delete-category" data-id="${esc(c.id)}" aria-label="${esc(c.name)}を削除">✕</button></li>`).join('')}</ul>` : ''}
-    </section>
+    </section>`}
 
     <section class="card" id="data-card">
       <h2>データ${helpBtn('backup')}</h2>
@@ -164,6 +175,35 @@ function addCalendar() {
 }
 
 export const settingsActions = {
+  /** 表示モードの切り替え。カード中心にするときは、カードの管理を始め、生活費予算を0円にする（元に戻せる） */
+  'set-mode': async (btn, ev) => {
+    flushSaves();
+    const mode = btn.dataset.mode;
+    if ((mode === 'card') === isCardMode()) return;
+    const before = { display: state.profile.display, card: state.profile.card, budgets: state.budgets.map((b) => ({ ...b })) };
+    state.profile.display = { ...(state.profile.display ?? {}), mode };
+    let message = mode === 'card' ? 'カード中心の表示にしました' : 'すべての機能を表示しました';
+    if (mode === 'card') {
+      state.profile.card = { ...cardSettings(), enabled: true };
+      if (state.budgets.some((b) => Number(b.monthlyLimit) > 0)) {
+        state.budgets = state.budgets.map((b) => ({ ...b, monthlyLimit: 0 }));
+        await ds.saveBudgets(state.budgets);
+        message += '（カード代と二重にならないよう、生活費予算を0円にしました）';
+      }
+    }
+    await ds.saveProfile(state.profile);
+    render();
+    showToast(message, {
+      label: '元に戻す',
+      run: async () => {
+        Object.assign(state.profile, { display: before.display, card: before.card });
+        state.budgets = before.budgets;
+        await Promise.all([ds.saveProfile(state.profile), ds.saveBudgets(state.budgets)]);
+        render();
+        showToast('元に戻しました');
+      },
+    });
+  },
   'add-calendar': async (btn, ev) => {
     addCalendar();
     showToast(isIOS() ? '開いた画面で「すべて追加」を押してください' : 'ダウンロードしたファイルを開いて、カレンダーに追加してください');

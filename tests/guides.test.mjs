@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
-import { GUIDES, SCREEN_GUIDES } from '../public/js/guideContent.js';
+import { GUIDES, SCREEN_GUIDES, CARD_MODE_HIDDEN } from '../public/js/guideContent.js';
 
 const ROUTES = ['home', 'ledger', 'budget', 'sim', 'settings'];
 
@@ -47,4 +47,8 @@ test('すべての画面に「この画面の使い方」があり、どのガ�
   for (const id of listed) assert.ok(GUIDES[id], `一覧の ${id} がない`);
   const unlisted = Object.keys(GUIDES).filter((id) => !listed.has(id));
   assert.deepEqual(unlisted, []);
+});
+
+test('カード中心の表示で隠すガイドは、すべて存在する', () => {
+  for (const id of CARD_MODE_HIDDEN) assert.ok(GUIDES[id], `${id} がない`);
 });

@@ -9,6 +9,7 @@ import {
   goalPlan, goalsMonthlyTotal, earmarkedSavings,
   bonusSchedule, bonusPayoutsBefore, bonusAllocation, bonusDueThisMonth, planAt, upsertPlanSnapshot,
   periodLeftover, goalsPaidIn, reminderCalendar, budgetPeriod as period, dayInPeriod, cardBillIn,
+  cardCycle, latestCardUsage, cardUsageStatus, cardBillReview,
 } from '../public/js/calc.js';
 
 const groupOf = (id) => (['food', 'daily'].includes(id) ? 'living' : 'free');
@@ -525,4 +526,47 @@ test('期間内のカードの請求額の記録を探す', () => {
   assert.equal(cardBillIn(list, period(new Date(2026, 9, 14), 1)).id, 'b');
   assert.equal(cardBillIn(list, period(new Date(2026, 8, 14), 1)).id, 'a');
   assert.equal(cardBillIn(list, period(new Date(2026, 7, 14), 1)), null);
+});
+
+test('カードの利用サイクル：締め日で区切り、請求は翌月の引き落とし日', () => {
+  const t = new Date(2026, 9, 19);
+  const eom = cardCycle(t, 31, 27); // 月末締め・翌月27日払い
+  assert.deepEqual([eom.startKey, eom.endKey, eom.days, eom.payKey], ['2026-10-01', '2026-10-31', 31, '2026-11-27']);
+  const mid = cardCycle(t, 15, 10); // 15日締め・翌月10日払い
+  assert.deepEqual([mid.startKey, mid.endKey, mid.payKey], ['2026-10-16', '2026-11-15', '2026-12-10']);
+  assert.equal(cardCycle(new Date(2026, 9, 15), 15, 10).endKey, '2026-10-15'); // 締め日当日はそのサイクル
+  const feb = cardCycle(new Date(2027, 1, 10), 31, 31); // 2月は月末＝28日
+  assert.deepEqual([feb.startKey, feb.endKey, feb.payKey], ['2027-02-01', '2027-02-28', '2027-03-31']);
+  assert.equal(cardCycle(new Date(2026, 11, 20), 31, 27).payKey, '2027-01-27'); // 年またぎ
+});
+
+test('カードの利用額：最後に入れた額から、あと使える額・1日あたり・請求見込みを出す', () => {
+  const t = new Date(2026, 9, 19);
+  const cycle = cardCycle(t, 31, 27);
+  const usage = [
+    { id: 'a', date: '2026-09-30', amount: 99999 }, // 前のサイクル
+    { id: 'b', date: '2026-10-10', amount: 40000 },
+    { id: 'c', date: '2026-10-19', amount: 76000 },
+  ];
+  const latest = latestCardUsage(usage, cycle);
+  assert.equal(latest.id, 'c');
+  const st = cardUsageStatus({ cycle, limit: 150000, latest, today: t });
+  assert.deepEqual([st.used, st.remaining, st.daysLeft, st.projected], [76000, 74000, 13, 124000]); // 76,000 ÷ 19日 × 31日
+  assert.equal(Math.round(st.perDay), 5692);
+  const none = cardUsageStatus({ cycle, limit: 150000, latest: latestCardUsage([], cycle), today: t });
+  assert.deepEqual([none.entered, none.remaining, none.projected], [false, 150000, null]);
+  assert.equal(cardUsageStatus({ cycle, limit: 50000, latest, today: t }).perDay, 0); // 使いすぎ
+});
+
+test('請求額のふり返り：直前3回の平均と比べる', () => {
+  const bills = [
+    { date: '2026-07-27', amount: 70000 }, { date: '2026-08-27', amount: 80000 },
+    { date: '2026-09-27', amount: 90000 }, { date: '2026-06-27', amount: 999999 }, // 4回前は使わない
+  ];
+  const up = cardBillReview(bills, { date: '2026-10-27', amount: 99000 });
+  assert.deepEqual([up.avg, up.diff, up.level, up.count], [80000, 19000, 'up', 3]);
+  assert.equal(cardBillReview(bills, { date: '2026-10-27', amount: 70000 }).level, 'down');
+  assert.equal(cardBillReview(bills, { date: '2026-10-27', amount: 82000 }).level, 'same');
+  assert.equal(cardBillReview([], { date: '2026-10-27', amount: 1 }), null);
+  assert.equal(cardBillReview(bills, null), null);
 });

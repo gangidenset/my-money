@@ -1,5 +1,5 @@
 import {
-  n, sum, inPeriod, periodLabel, periodHistory, niceScale, compactYen, yen,
+  n, sum, inPeriod, periodLabel, periodHistory, niceScale, compactYen, yen, parseDateKey,
 } from '../calc.js';
 import { state, $main, esc, catMap, groupOf, catLabel, planFor, payday } from '../core.js';
 import { helpBtn } from '../guides.js';
@@ -22,12 +22,35 @@ export function chartsView(period) {
   const rows = periodHistory({ expenses: state.expenses, planFor, groupOf, payday: payday() });
   return `
     ${categoryChart(period)}
+    ${cardBillChart()}
     ${flowChart(rows)}
     ${savingChart(rows)}
     <p class="note center">収入や固定費は、設定を変えた月から反映しています（それより前の月は、記録が残っている最初の設定で計算）。</p>`;
 }
 
-export function tableView(head, body) {
+export /** クレジットカードの請求額の推移（直近6回）と平均 */
+function cardBillChart() {
+  const bills = state.expenses.filter((e) => e.kind === 'cardBill').sort((a, b) => a.date.localeCompare(b.date)).slice(-6);
+  if (bills.length < 2) return '';
+  const avg = sum(bills, (b) => b.amount) / bills.length;
+  const sc = niceScale(0, Math.max(...bills.map((b) => b.amount)));
+  const pct = (v) => ((v - sc.min) / (sc.max - sc.min)) * 100;
+  const label = (b) => `${parseDateKey(b.date).getMonth() + 1}/${parseDateKey(b.date).getDate()}`;
+  const cols = bills.map((b) => `<div class="col" ${tipAttr(`${label(b)} の引き落とし`, [
+    { key: 's1', label: '請求額', value: b.amount },
+    { key: 'line', label: '平均', value: avg },
+    { label: '平均との差', value: b.amount - avg },
+  ])}><span class="vbar pos" style="bottom:0;height:${pct(b.amount)}%"></span></div>`);
+  return `
+    <section class="card chart-card">
+      <p class="chart-title">💳 カードの請求額の推移 <span class="muted">平均 ${yen(avg)}</span></p>
+      <p class="legend"><span><i class="key-rect s1"></i>請求額</span><span><i class="key-line"></i>平均</span></p>
+      ${columnFrame(sc, cols, bills.map((b) => `<span>${label(b)}</span>`), `<div class="refline" style="bottom:${pct(avg)}%"></div>`)}
+      ${tableView(['引き落とし日', '請求額', '平均との差'], bills.map((b) => [label(b), yen(b.amount), `${b.amount - avg >= 0 ? '+' : '−'}${yen(Math.abs(b.amount - avg))}`]))}
+    </section>`;
+}
+
+function tableView(head, body) {
   return `<details class="table-view"><summary>表で見る</summary>
     <table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead>
     <tbody>${body.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>
