@@ -75,3 +75,18 @@ test('新しい版のアプリで保存されたデータなら、書き換え�
   await expect(page.getByRole('heading', { name: 'アプリを更新してください' })).toBeVisible();
   expect(await stored(page, 'schemaVersion')).toBe(999);
 });
+
+test('設定からプライバシーポリシー・利用規約を開き、アプリに戻れる（データは残る）', async ({ page }) => {
+  await openApp(page, { data: baseData(), hash: '#/settings' });
+  await page.getByRole('link', { name: 'プライバシーポリシー' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'プライバシーポリシー' })).toBeVisible();
+  await expect(page.getByText('利用者の端末の中だけに保存')).toBeVisible();
+
+  await page.getByRole('link', { name: '利用規約' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: '利用規約' })).toBeVisible();
+  await expect(page.getByText('投資助言ではありません。').first()).toBeVisible();
+
+  await page.getByRole('link', { name: '← アプリに戻る' }).click();
+  await expect(page.locator('#page-title')).toHaveText('設定');
+  expect((await stored(page, 'profile')).takeHome).toBe(300000);
+});

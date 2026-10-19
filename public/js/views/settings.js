@@ -152,6 +152,8 @@ export function settingsView() {
       <button class="btn danger block" data-action="reset">すべてのデータを削除</button>
     </section>
 
+    <p class="note center">表示される金額やシミュレーションは参考の試算で、投資助言ではありません。</p>
+    <p class="legal-links"><a href="privacy.html">プライバシーポリシー</a><a href="terms.html">利用規約</a></p>
     <p class="muted center">my-money v${APP_VERSION}</p>`;
 }
 

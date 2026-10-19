@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "io.github.gangidenset.mymoney",
+      "sha256_cert_fingerprints": [
+        "ここに Play Console の「アプリの署名鍵の証明書」の SHA-256 を貼る",
+        "ここに アップロード鍵（bubblewrap で作った鍵）の SHA-256 を貼る"
+      ]
+    }
+  }
+]

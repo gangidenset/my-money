@@ -23,6 +23,8 @@ npm run test:all
 ```
 public/
   index.html          画面の骨組み・下部ナビ
+  privacy.html        プライバシーポリシー（ストア公開に必須）
+  terms.html          利用規約
   css/app.css         スタイル（320px〜、ダークモード対応）
   js/app.js           画面の切り替え・入力とボタン操作の振り分け
   js/core.js          共有する状態・データの読み込みと保存・描画の呼び出し口
@@ -44,6 +46,8 @@ public/
 tests/                計算ロジック・サービスワーカーのテスト（node --test）
 e2e/                  画面操作のテスト（Playwright。スマホ幅・日付固定）
 server.mjs            開発用サーバー
+docs/google-play.md   Google Play で公開する手順（TWA）
+twa/assetlinks.json   TWA の所有証明のひな形（gangidenset.github.io 直下に置く）
 ```
 
 各画面のボタン操作は、画面ごとのファイルの `○○Actions`（data-action 名 → 処理）にまとめている。
@@ -114,6 +118,10 @@ PWA（ホーム画面に追加・オフライン）は HTTPS で配信したと�
 サブディレクトリ配信でも動くよう、パスはすべて相対パスにしている。
 
 アプリのファイルを追加・削除したときは `public/service-worker.js` の `SHELL` を更新し、`CACHE` の番号を上げる。
+
+## Google Play で公開する
+
+[docs/google-play.md](docs/google-play.md) の手順で、PWA を TWA として包んで出す。プライバシーポリシー・利用規約は `public/privacy.html`・`public/terms.html`（設定画面の下からリンク）。データの扱いや有料機能を変えるときは、この2つと制定日も更新する。
 
 ## 使い方ガイドの追加・修正
 

@@ -664,3 +664,13 @@ input[data-money] { text-align: right; font-variant-numeric: tabular-nums; }
 .check-row input { width: 22px; height: 22px; min-height: 0; accent-color: var(--primary); flex: none; }
 .flow dt small { display: block; font-size: 0.72rem; color: var(--muted); font-weight: 400; white-space: normal; }
 #card-section .plain-list li span small { display: block; font-size: 0.72rem; }
+
+/* ---- プライバシーポリシー・利用規約 ---- */
+.legal-page .main { padding-bottom: calc(env(safe-area-inset-bottom) + 32px); }
+.legal .card p { margin: 0 0 10px; }
+.legal .card p:last-child { margin-bottom: 0; }
+.legal ul, .legal ol { margin: 0 0 10px; padding-left: 1.4em; }
+.legal li + li { margin-top: 4px; }
+.legal-back { margin: 0; }
+.legal-point { padding: 10px 12px; border-radius: 10px; background: var(--primary-soft); }
+.legal-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; margin: 0; font-size: 0.85rem; }
