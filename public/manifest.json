@@ -3,7 +3,7 @@
   "short_name": "my-money",
   "description": "自分の収入なら、どこまでお金を使っていいのか分かる家計アプリ",
   "lang": "ja",
-  "id": "./",
+  "id": "/my-money/",
   "start_url": "./#/home",
   "scope": "./",
   "display": "standalone",

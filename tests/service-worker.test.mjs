@@ -99,6 +99,9 @@ test('キャッシュ対象のファイルがすべて存在する', async () =>
   for (const icon of manifest.icons) await access(new URL(`../public/${icon.src}`, import.meta.url));
   assert.ok(manifest.icons.some((i) => i.purpose === 'maskable'));
   assert.equal(manifest.display, 'standalone');
+  // id は "./" にしない（サイトの一番上 https://gangidenset.github.io/ が ID になり、
+  // 同じサイトの他のアプリと同じアプリだと Chrome に判断されてインストールできなくなる）
+  assert.equal(manifest.id, '/my-money/');
 });
 
 test('public/ のファイルはすべてオフライン用の一覧に入っている', async () => {
